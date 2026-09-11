@@ -22,7 +22,12 @@ interface ThemeSwitcherProps {
 export function ThemeSwitcher({ variant = "dropdown", className }: ThemeSwitcherProps) {
   const { preference, setThemePreference } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -35,7 +40,8 @@ export function ThemeSwitcher({ variant = "dropdown", className }: ThemeSwitcher
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const ActiveIcon = THEME_ICONS[preference] || Moon;
+  const currentPreference = mounted ? preference : "system";
+  const ActiveIcon = THEME_ICONS[currentPreference] || Monitor;
 
   if (variant === "segmented") {
     return (
@@ -47,7 +53,7 @@ export function ThemeSwitcher({ variant = "dropdown", className }: ThemeSwitcher
       >
         {(["system", "light", "dark", "midnight", "professional"] as ThemePreference[]).map((p) => {
           const Icon = THEME_ICONS[p];
-          const isSelected = preference === p;
+          const isSelected = currentPreference === p;
           return (
             <button
               key={p}
@@ -80,7 +86,7 @@ export function ThemeSwitcher({ variant = "dropdown", className }: ThemeSwitcher
         aria-haspopup="true"
       >
         <ActiveIcon className="w-4 h-4 text-[var(--brand-primary)]" />
-        <span className="capitalize">{preference}</span>
+        <span className="capitalize">{currentPreference}</span>
         <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />
       </button>
 
@@ -98,7 +104,7 @@ export function ThemeSwitcher({ variant = "dropdown", className }: ThemeSwitcher
             }}
             className={cn(
               "w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-colors text-left",
-              preference === "system"
+              currentPreference === "system"
                 ? "bg-[var(--bg-surface-elevated)] text-[var(--brand-primary)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]"
             )}

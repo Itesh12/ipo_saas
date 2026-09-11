@@ -54,3 +54,14 @@ export * from './pruning/pruningService';
 
 // Phase 8 Audit Adapter
 export * from './audit/integrationAuditAdapter';
+
+// Stage 3A: Broker-Independent Real IPO Master Data Ingestion
+export * from './ipo-master/ipoMasterTypes';
+export * from './adapters/sebiExtractor';
+export * from './adapters/nseExtractor';
+export * from './adapters/bseExtractor';
+export * from './adapters/upstoxAdapter';
+export * from './services/canonicalIpoResolver';
+export * from './services/ipoIngestionService';
+export * from './actions/ingestionActions';
+

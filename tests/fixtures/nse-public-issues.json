@@ -1,0 +1,28 @@
+[
+  {
+    "symbol": "HEROMOTO",
+    "companyName": "Hero Motors Limited",
+    "isin": "INE123H01015",
+    "series": "EQ",
+    "issueStartDate": "2026-09-15",
+    "issueEndDate": "2026-09-18",
+    "priceBand": "₹420 to ₹445",
+    "lotSize": 33,
+    "issueSize": 1200.5,
+    "documentUrl": "https://www.nseindia.com/filings/hero-motors-rhp.pdf",
+    "status": "upcoming"
+  },
+  {
+    "symbol": "SONASEL",
+    "companyName": "Sona Selection Limited",
+    "isin": "INE456S01022",
+    "series": "EQ",
+    "issueStartDate": "2026-09-10",
+    "issueEndDate": "2026-09-12",
+    "priceBand": "75 - 80",
+    "lotSize": 1600,
+    "issueSize": 45.2,
+    "documentUrl": "https://www.nseindia.com/filings/sona-selection-rhp.pdf",
+    "status": "open"
+  }
+]

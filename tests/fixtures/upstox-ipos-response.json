@@ -1,0 +1,37 @@
+[
+  {
+    "id": "hero-motors-ipo",
+    "name": "Hero Motors Limited",
+    "symbol": "HEROMOTO",
+    "isin": "INE123H01015",
+    "issue_type": "regular",
+    "issue_size": 1200.5,
+    "minimum_price": 420.0,
+    "maximum_price": 445.0,
+    "lot_size": 33,
+    "minimum_quantity": 66,
+    "bidding_start_date": "2026-09-15T10:00:00Z",
+    "bidding_end_date": "2026-09-18T17:00:00Z",
+    "listing_date": "2026-09-23T09:15:00Z",
+    "listing_exchange": "NSE,BSE",
+    "rhp_url": "https://upstox.com/ipos/hero-motors-rhp.pdf",
+    "drhp_url": "https://upstox.com/ipos/hero-motors-drhp.pdf",
+    "status": "upcoming"
+  },
+  {
+    "id": "unannounced-energy-ipo",
+    "name": "Green Future Energy Limited",
+    "symbol": "GREENFUT",
+    "isin": "INE999G01088",
+    "issue_type": "sme",
+    "issue_size": 42.0,
+    "minimum_price": 0.0,
+    "maximum_price": 0.0,
+    "lot_size": 1200,
+    "minimum_quantity": 1200,
+    "bidding_start_date": "2026-09-28T10:00:00Z",
+    "bidding_end_date": "2026-10-01T17:00:00Z",
+    "listing_exchange": "BSE",
+    "status": "upcoming"
+  }
+]

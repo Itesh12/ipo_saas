@@ -1,0 +1,26 @@
+[
+  {
+    "scripCode": "544999",
+    "companyName": "Hero Motors Limited",
+    "securityType": "Equity",
+    "issueType": "Book Building",
+    "startDate": "2026-09-15",
+    "endDate": "2026-09-18",
+    "priceBandLow": 420.0,
+    "priceBandHigh": 445.0,
+    "lotSize": 33,
+    "issueSizeCr": 1200.5
+  },
+  {
+    "scripCode": "544888",
+    "companyName": "Rentomojo Consumer Services Limited",
+    "securityType": "Equity",
+    "issueType": "Book Building",
+    "startDate": "2026-10-01",
+    "endDate": "2026-10-05",
+    "priceBandLow": 250.0,
+    "priceBandHigh": 265.0,
+    "lotSize": 56,
+    "issueSizeCr": 650.0
+  }
+]
