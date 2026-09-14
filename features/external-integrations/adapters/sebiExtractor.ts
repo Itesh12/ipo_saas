@@ -131,7 +131,7 @@ export class SebiPublicIssuesExtractor {
       }
 
       const cells: string[] = [];
-      const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      const cellRegex = /<td[^>]*>([\s\S]*?)(?:<\/td>|(?=<td)|$)/gi;
       let cellMatch;
       while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
         cells.push(cellMatch[1].trim());
@@ -141,27 +141,35 @@ export class SebiPublicIssuesExtractor {
         const dateText = cells[0].replace(/<[^>]+>/g, '').trim();
         const contentCell = cells[1];
 
-        // Extract anchor tag and title
-        const anchorMatch = /<a\s+(?:[^>]*?\s+)?href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/i.exec(contentCell);
-        if (anchorMatch) {
-          const href = anchorMatch[1].trim();
-          const title = anchorMatch[2].replace(/<[^>]+>/g, '').trim();
-          const leadManager = cells[2] ? cells[2].replace(/<[^>]+>/g, '').trim() : undefined;
+        const hrefMatch = /href=["']([^"']+)["']/i.exec(contentCell);
+        if (hrefMatch) {
+          const href = hrefMatch[1].trim();
+          let title = '';
 
-          // Normalize relative URLs to absolute SEBI domain
-          const fullUrl = href.startsWith('http')
-            ? href
-            : `https://www.sebi.gov.in${href.startsWith('/') ? '' : '/'}${href}`;
+          const pointsMatch = /class=["']points["'][^>]*>([\s\S]*)/i.exec(contentCell);
+          if (pointsMatch) {
+            title = pointsMatch[1].split(/<br\s*\/?>/i)[0].replace(/<[^>]+>/g, '').trim();
+          } else {
+            const generalMatch = /<a[^>]*>([\s\S]*)/i.exec(contentCell);
+            title = generalMatch ? generalMatch[1].split(/<br\s*\/?>/i)[0].replace(/<[^>]+>/g, '').trim() : '';
+          }
 
-          const extracted = this.normalizeRow({
-            filingDate: dateText,
-            companyName: title,
-            documentTitle: title,
-            documentUrl: fullUrl,
-            leadManager,
-          });
+          if (title) {
+            const leadManager = cells[2] ? cells[2].replace(/<[^>]+>/g, '').trim() : undefined;
+            const fullUrl = href.startsWith('http')
+              ? href
+              : `https://www.sebi.gov.in${href.startsWith('/') ? '' : '/'}${href}`;
 
-          results.push(extracted);
+            const extracted = this.normalizeRow({
+              filingDate: dateText,
+              companyName: title,
+              documentTitle: title,
+              documentUrl: fullUrl,
+              leadManager,
+            });
+
+            results.push(extracted);
+          }
         }
       }
     }
@@ -171,8 +179,10 @@ export class SebiPublicIssuesExtractor {
 
   private static cleanCompanyName(raw: string): string {
     return raw
-      .replace(/\s*-\s*(Draft\s+Offer\s+Document|Red\s+Herring\s+Prospectus|Prospectus|Addendum|Corrigendum|UDRHP).*$/i, '')
+      .split(/<br\s*\/?>/i)[0]
+      .replace(/\s*-\s*(Draft\s+Offer\s+Document|Red\s+Herring\s+Prospectus|Prospectus|Addendum|Corrigendum|UDRHP|RHP|DRHP).*$/i, '')
       .replace(/\s*-\s*filed\s+with\s+(SEBI|ROC).*$/i, '')
+      .replace(/<[^>]+>/g, '')
       .replace(/\s+/g, ' ')
       .trim();
   }

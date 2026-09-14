@@ -59,18 +59,19 @@ export class IpoIngestionService {
     const isDuplicate = rpcResult.is_duplicate === true;
     const observationId = rpcResult.observation_id;
 
-    // 4. If observation was a duplicate, no conflict resolution needed
+    // 4. If observation was a duplicate, re-evaluate conflicts against current resolver
     if (isDuplicate) {
+      const conflictOutcome = await this.evaluateInboxConflicts(inboxId, admin);
       return {
         inboxId,
         observationId,
         isDuplicate: true,
-        hasConflict: false,
+        hasConflict: conflictOutcome.hasConflict,
       };
     }
 
     // 5. Evaluate Conflicts against existing inbox observations
-    const conflictOutcome = await this.evaluateInboxConflicts(inboxId, extraction, admin);
+    const conflictOutcome = await this.evaluateInboxConflicts(inboxId, admin);
 
     return {
       inboxId,
@@ -103,16 +104,58 @@ export class IpoIngestionService {
     // Query active inbox records for identity matching
     const { data: candidates } = await admin
       .from('ipo_ingestion_inbox')
-      .select('id, canonical_name, symbol, isin')
-      .in('review_status', ['pending', 'promoted_to_draft']);
+      .select('id, canonical_name, symbol, isin, review_status')
+      .in('review_status', [
+        'candidate',
+        'identity_resolved',
+        'pending',
+        'pending_review',
+        'conflict_detected',
+        'promoted_to_draft',
+        'promoted_to_published',
+      ]);
 
     if (candidates && candidates.length > 0) {
       for (const candidate of candidates) {
         if (CanonicalIpoResolver.isIdentityMatch(extraction.normalized_payload, candidate)) {
+          // Check if candidate is already bound to a different external_id from the same source
+          const { data: conflictingBinding } = await admin
+            .from('ipo_source_identity_bindings')
+            .select('external_id')
+            .eq('inbox_id', candidate.id)
+            .eq('source', extraction.source)
+            .neq('external_id', extraction.external_id)
+            .limit(1)
+            .maybeSingle();
+
+          if (conflictingBinding) {
+            // Local Inbox Identity Consistency: Cannot attach two different external_ids from same source to same inbox
+            continue;
+          }
+
+          // If candidate was in 'candidate' state and now has confirmed symbol or ISIN, promote state to identity_resolved
+          if (
+            candidate.review_status === 'candidate' &&
+            (extraction.normalized_payload.symbol || extraction.normalized_payload.isin)
+          ) {
+            await admin
+              .from('ipo_ingestion_inbox')
+              .update({
+                review_status: 'identity_resolved',
+                symbol: extraction.normalized_payload.symbol || candidate.symbol,
+                isin: extraction.normalized_payload.isin || candidate.isin,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', candidate.id);
+          }
           return candidate.id;
         }
       }
     }
+
+    // Determine initial review status: candidate vs pending_review
+    const hasStrongIdentity = Boolean(extraction.normalized_payload.symbol || extraction.normalized_payload.isin);
+    const initialStatus = hasStrongIdentity ? 'pending_review' : 'candidate';
 
     // Create a new canonical inbox record
     const { data: newInbox, error: insertError } = await admin
@@ -121,7 +164,7 @@ export class IpoIngestionService {
         canonical_name: extraction.normalized_payload.company_name,
         symbol: extraction.normalized_payload.symbol || null,
         isin: extraction.normalized_payload.isin || null,
-        review_status: 'pending',
+        review_status: initialStatus,
         has_conflict: false,
       })
       .select('id')
@@ -137,11 +180,12 @@ export class IpoIngestionService {
   /**
    * Re-evaluates conflict state for an inbox record given all its observations.
    */
-  private async evaluateInboxConflicts(
+  public async evaluateInboxConflicts(
     inboxId: string,
-    latestExtraction: IngestionExtractionResult,
-    admin: ReturnType<typeof createAdminClient>
+    providedAdmin?: ReturnType<typeof createAdminClient>
   ): Promise<{ hasConflict: boolean }> {
+    const admin = providedAdmin || createAdminClient();
+
     // Fetch latest observation details
     const { data: observations } = await admin
       .from('ipo_ingestion_observations')
@@ -150,6 +194,15 @@ export class IpoIngestionService {
       .order('observed_at', { ascending: true });
 
     if (!observations || observations.length <= 1) {
+      await admin
+        .from('ipo_ingestion_inbox')
+        .update({
+          has_conflict: false,
+          conflict_details: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', inboxId);
+
       return { hasConflict: false };
     }
 
@@ -181,12 +234,31 @@ export class IpoIngestionService {
       }
     }
 
+    // Fetch existing inbox record to preserve promoted status
+    const { data: currentInbox } = await admin
+      .from('ipo_ingestion_inbox')
+      .select('review_status, promoted_ipo_id')
+      .eq('id', inboxId)
+      .single();
+
+    let targetReviewStatus = currentInbox?.review_status;
+    if (anyConflict) {
+      targetReviewStatus = 'conflict_detected';
+    } else if (
+      targetReviewStatus === 'candidate' ||
+      targetReviewStatus === 'pending' ||
+      targetReviewStatus === 'conflict_detected'
+    ) {
+      targetReviewStatus = 'pending_review';
+    }
+
     // Update inbox record with conflict state
     await admin
       .from('ipo_ingestion_inbox')
       .update({
         has_conflict: anyConflict,
         conflict_details: anyConflict ? allConflicts : null,
+        review_status: targetReviewStatus,
         canonical_name: mergedPayload.company_name,
         symbol: mergedPayload.symbol || null,
         isin: mergedPayload.isin || null,
@@ -199,6 +271,7 @@ export class IpoIngestionService {
 
   /**
    * Promotes an inbox record to a Draft IPO in the production `ipos` table.
+   * If already linked to an `ipos` record, updates the existing record with the latest resolved payload.
    */
   public async promoteToDraft(inboxId: string, adminUserId: string): Promise<string> {
     const admin = createAdminClient();
@@ -228,15 +301,51 @@ export class IpoIngestionService {
       .replace(/^-+|-+$/g, '');
 
     // Map category to valid ipo_category enum ('mainboard', 'sme_bse', 'sme_nse')
-    let dbCategory = 'mainboard';
+    let dbCategory: 'mainboard' | 'sme_bse' | 'sme_nse' = 'mainboard';
     if (payload.category === 'sme') {
       dbCategory = payload.exchange === 'BSE' ? 'sme_bse' : 'sme_nse';
-    } else if (payload.category === 'sme_bse' || payload.category === 'sme_nse') {
-      dbCategory = payload.category;
     }
 
     const lotSize = payload.lot_size && payload.lot_size > 0 ? payload.lot_size : 1;
     const minInvestment = payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
+
+    // If already promoted, update the existing IPO record rather than inserting a duplicate
+    if (inbox.promoted_ipo_id) {
+      const { error: updateError } = await admin
+        .from('ipos')
+        .update({
+          company_name: payload.company_name,
+          symbol: payload.symbol || undefined,
+          category: dbCategory,
+          issue_type: payload.issue_type || 'book_building',
+          status: payload.business_status || 'upcoming',
+          price_band_low: payload.price_band_low,
+          price_band_high: payload.price_band_high,
+          lot_size: lotSize,
+          min_investment: minInvestment,
+          issue_size_cr: payload.issue_size_cr,
+          open_date: payload.open_date,
+          close_date: payload.close_date,
+          listing_date: payload.listing_date,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', inbox.promoted_ipo_id);
+
+      if (updateError) {
+        throw new Error(`Failed to update existing IPO ${inbox.promoted_ipo_id}: ${updateError.message}`);
+      }
+
+      await admin
+        .from('ipo_ingestion_inbox')
+        .update({
+          review_status: 'promoted_to_draft',
+          reviewed_at: new Date().toISOString(),
+          reviewed_by: adminUserId,
+        })
+        .eq('id', inboxId);
+
+      return inbox.promoted_ipo_id;
+    }
 
     // Insert into `ipos` table as draft
     const { data: ipo, error: ipoError } = await admin
@@ -271,6 +380,132 @@ export class IpoIngestionService {
       .from('ipo_ingestion_inbox')
       .update({
         review_status: 'promoted_to_draft',
+        promoted_ipo_id: ipo.id,
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: adminUserId,
+      })
+      .eq('id', inboxId);
+
+    return ipo.id;
+  }
+
+  /**
+   * Promotes an inbox record directly to Published status in the production `ipos` table.
+   * If already linked to an `ipos` record, updates it to published with latest authoritative data.
+   */
+  public async promoteToPublished(
+    inboxId: string,
+    adminUserId: string,
+    options?: { skipValidation?: boolean }
+  ): Promise<string> {
+    const admin = createAdminClient();
+
+    const { data: inbox } = await admin
+      .from('ipo_ingestion_inbox')
+      .select('*, ipo_ingestion_observations!fk_inbox_latest_observation(*)')
+      .eq('id', inboxId)
+      .single();
+
+    if (!inbox) {
+      throw new Error(`Inbox record ${inboxId} not found`);
+    }
+
+    const obs = (inbox as unknown as { ipo_ingestion_observations: IngestionObservationRecord }).ipo_ingestion_observations;
+    if (!obs) {
+      throw new Error(`Inbox record ${inboxId} has no active observation`);
+    }
+
+    const payload = obs.normalized_payload;
+
+    if (!options?.skipValidation) {
+      const validation = IpoIngestionService.validateDirectPublish(inbox as unknown as CanonicalInboxRecord, payload);
+      if (!validation.canPublish) {
+        throw new Error(`Cannot promote to published: ${validation.reasons.join(', ')}`);
+      }
+    }
+
+    const baseSlug = payload.company_name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    let dbCategory: 'mainboard' | 'sme_bse' | 'sme_nse' = 'mainboard';
+    if (payload.category === 'sme') {
+      dbCategory = payload.exchange === 'BSE' ? 'sme_bse' : 'sme_nse';
+    }
+
+    const lotSize = payload.lot_size && payload.lot_size > 0 ? payload.lot_size : 1;
+    const minInvestment = payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
+
+    if (inbox.promoted_ipo_id) {
+      const { error: updateError } = await admin
+        .from('ipos')
+        .update({
+          company_name: payload.company_name,
+          symbol: payload.symbol || undefined,
+          category: dbCategory,
+          issue_type: payload.issue_type || 'book_building',
+          status: payload.business_status || 'upcoming',
+          publication_status: 'published',
+          price_band_low: payload.price_band_low,
+          price_band_high: payload.price_band_high,
+          lot_size: lotSize,
+          min_investment: minInvestment,
+          issue_size_cr: payload.issue_size_cr,
+          open_date: payload.open_date,
+          close_date: payload.close_date,
+          listing_date: payload.listing_date,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', inbox.promoted_ipo_id);
+
+      if (updateError) {
+        throw new Error(`Failed to update published IPO ${inbox.promoted_ipo_id}: ${updateError.message}`);
+      }
+
+      await admin
+        .from('ipo_ingestion_inbox')
+        .update({
+          review_status: 'promoted_to_published',
+          reviewed_at: new Date().toISOString(),
+          reviewed_by: adminUserId,
+        })
+        .eq('id', inboxId);
+
+      return inbox.promoted_ipo_id;
+    }
+
+    const { data: ipo, error: ipoError } = await admin
+      .from('ipos')
+      .insert({
+        company_name: payload.company_name,
+        slug: `${baseSlug}-${Date.now().toString().slice(-4)}`,
+        symbol: payload.symbol || baseSlug.slice(0, 10).toUpperCase(),
+        category: dbCategory,
+        issue_type: payload.issue_type || 'book_building',
+        status: payload.business_status || 'upcoming',
+        publication_status: 'published',
+        price_band_low: payload.price_band_low,
+        price_band_high: payload.price_band_high,
+        lot_size: lotSize,
+        min_investment: minInvestment,
+        issue_size_cr: payload.issue_size_cr,
+        open_date: payload.open_date,
+        close_date: payload.close_date,
+        listing_date: payload.listing_date,
+        about_company: `${payload.company_name} initial public offering registered with regulatory offer documents.`,
+      })
+      .select('id')
+      .single();
+
+    if (ipoError || !ipo) {
+      throw new Error(`Failed to create published IPO: ${ipoError?.message}`);
+    }
+
+    await admin
+      .from('ipo_ingestion_inbox')
+      .update({
+        review_status: 'promoted_to_published',
         promoted_ipo_id: ipo.id,
         reviewed_at: new Date().toISOString(),
         reviewed_by: adminUserId,

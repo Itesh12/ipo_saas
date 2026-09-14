@@ -32,6 +32,113 @@ export function getTodayIST(): string {
   return istFormatter.format(now);
 }
 
+export interface DeriveLifecycleParams {
+  open_date?: string | null;
+  close_date?: string | null;
+  allotment_date?: string | null;
+  listing_date?: string | null;
+  status?: IPOStatus | string | null;
+  allotmentFinalizedEvidence?: boolean;
+  nowIST?: string; // Formatted YYYY-MM-DD or ISO string
+}
+
+export interface LifecycleDerivationResult {
+  sourceStatus: string | null;
+  derivedStatus: IPOStatus;
+  finalStatus: IPOStatus;
+  reason: string;
+  statusSource: 'explicit_override' | 'authoritative_listing' | 'authoritative_allotment' | 'bidding_window' | 'dates_pending';
+}
+
+/**
+ * Derives an explainable, deterministic lifecycle status using an explicit IST instant.
+ * Does not manufacture allotment completion without authoritative evidence.
+ */
+export function deriveExplainableIPOStatus(params: DeriveLifecycleParams): LifecycleDerivationResult {
+  const sourceStatus = params.status ? String(params.status) : null;
+  const now = (params.nowIST || getTodayIST()).slice(0, 10);
+  const { open_date, close_date, allotment_date, listing_date, allotmentFinalizedEvidence } = params;
+
+  // 1. Respect explicit manual cancellations/withdrawals
+  if (sourceStatus === "withdrawn" || sourceStatus === "cancelled") {
+    return {
+      sourceStatus,
+      derivedStatus: sourceStatus as IPOStatus,
+      finalStatus: sourceStatus as IPOStatus,
+      reason: `issue_${sourceStatus}`,
+      statusSource: "explicit_override",
+    };
+  }
+
+  // 2. Listing Date Elapsed
+  if (listing_date && now >= listing_date.slice(0, 10)) {
+    return {
+      sourceStatus,
+      derivedStatus: "listed",
+      finalStatus: "listed",
+      reason: "listing_date_elapsed",
+      statusSource: "authoritative_listing",
+    };
+  }
+
+  // 3. Allotment Finalized / Listing Soon (respects allotment_date unless evidence explicitly negated)
+  const hasAllotment =
+    allotmentFinalizedEvidence === true ||
+    (allotmentFinalizedEvidence !== false && allotment_date && now >= allotment_date.slice(0, 10));
+
+  if (hasAllotment && (!listing_date || now < listing_date.slice(0, 10))) {
+    return {
+      sourceStatus,
+      derivedStatus: "listing_soon",
+      finalStatus: "listing_soon",
+      reason: "allotment_finalized_awaiting_listing",
+      statusSource: "authoritative_allotment",
+    };
+  }
+
+  // 4. Bidding Closed (Never manufacture allotment completion without evidence)
+  if (close_date && now > close_date.slice(0, 10)) {
+    return {
+      sourceStatus,
+      derivedStatus: "closed",
+      finalStatus: "closed",
+      reason: "bidding_closed_awaiting_allotment",
+      statusSource: "bidding_window",
+    };
+  }
+
+  // 5. Active Bidding Window
+  if (open_date && close_date && now >= open_date.slice(0, 10) && now <= close_date.slice(0, 10)) {
+    return {
+      sourceStatus,
+      derivedStatus: "open",
+      finalStatus: "open",
+      reason: "bidding_window_active",
+      statusSource: "bidding_window",
+    };
+  }
+
+  // 6. Upcoming Bidding
+  if (open_date && now < open_date.slice(0, 10)) {
+    return {
+      sourceStatus,
+      derivedStatus: "upcoming",
+      finalStatus: "upcoming",
+      reason: "bidding_starts_future",
+      statusSource: "bidding_window",
+    };
+  }
+
+  // 7. Announced (Document filed, dates pending)
+  return {
+    sourceStatus,
+    derivedStatus: "announced",
+    finalStatus: "announced",
+    reason: "prospectus_filed_dates_pending",
+    statusSource: "dates_pending",
+  };
+}
+
 /**
  * Derives the active business lifecycle status based on IST timeline dates.
  * Preserves explicit manual statuses (e.g. 'withdrawn', 'cancelled') if present.
@@ -40,35 +147,15 @@ export function deriveIPOStatus(
   ipo: Pick<IPORow, "open_date" | "close_date" | "allotment_date" | "listing_date" | "status">,
   referenceDateIST: string = getTodayIST()
 ): IPOStatus {
-  // Respect manual override statuses
-  if (ipo.status === "withdrawn" || ipo.status === "cancelled") {
-    return ipo.status;
-  }
-
-  const today = referenceDateIST;
-  const { open_date, close_date, allotment_date, listing_date } = ipo;
-
-  if (listing_date && today >= listing_date) {
-    return "listed";
-  }
-
-  if (allotment_date && listing_date && today > allotment_date && today < listing_date) {
-    return "listing_soon";
-  }
-
-  if (close_date && today > close_date) {
-    return "closed";
-  }
-
-  if (open_date && close_date && today >= open_date && today <= close_date) {
-    return "open";
-  }
-
-  if (open_date && today < open_date) {
-    return "upcoming";
-  }
-
-  return "announced";
+  const result = deriveExplainableIPOStatus({
+    open_date: ipo.open_date,
+    close_date: ipo.close_date,
+    allotment_date: ipo.allotment_date,
+    listing_date: ipo.listing_date,
+    status: ipo.status,
+    nowIST: referenceDateIST,
+  });
+  return result.finalStatus;
 }
 
 /**

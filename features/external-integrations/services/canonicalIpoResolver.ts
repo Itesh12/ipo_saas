@@ -11,7 +11,10 @@ import {
   NormalizedIpoMasterPayload,
   IpoProvenanceMap,
   IngestionConflictDetail,
+  FreshnessGrade,
+  RecordFreshnessMeta,
 } from '../ipo-master/ipoMasterTypes';
+import { deriveExplainableIPOStatus, LifecycleDerivationResult } from '@/features/ipo/services/ipoLifecycle';
 
 export interface ResolutionOutcome {
   canonical_name: string;
@@ -21,6 +24,8 @@ export interface ResolutionOutcome {
   conflict_details: IngestionConflictDetail[];
   resolved_payload: NormalizedIpoMasterPayload;
   resolved_provenance: IpoProvenanceMap;
+  lifecycle: LifecycleDerivationResult;
+  freshness: RecordFreshnessMeta;
 }
 
 export class CanonicalIpoResolver {
@@ -58,11 +63,13 @@ export class CanonicalIpoResolver {
 
   /**
    * Merges an incoming observation into existing normalized payload using field-level authority.
+   * Guardrail 2: Freezes and flags for admin review when two Tier-1 sources conflict.
    */
   public static resolveObservation(
     existingPayload: NormalizedIpoMasterPayload,
     existingProvenance: IpoProvenanceMap,
-    incoming: IngestionExtractionResult
+    incoming: IngestionExtractionResult,
+    options?: { nowIST?: string }
   ): ResolutionOutcome {
     const resolved: NormalizedIpoMasterPayload = { ...existingPayload };
     const resolvedProvenance: IpoProvenanceMap = { ...existingProvenance };
@@ -79,9 +86,9 @@ export class CanonicalIpoResolver {
 
       const exVal = existingPayload[key];
       const exProv = existingProvenance[key];
-      const exSource = exProv ? exProv.source : undefined;
+      const exSource = exProv ? exProv.source : existingProvenance.company_name?.source;
 
-      // If field is currently empty, simply adopt incoming value
+      // If field is currently empty, adopt incoming value
       if (exVal === undefined || exVal === null) {
         (resolved as unknown as Record<string, unknown>)[key] = incVal;
         if (incomingProv[key]) {
@@ -95,8 +102,17 @@ export class CanonicalIpoResolver {
         continue;
       }
 
-      // Conflict detected! Apply field-specific authority rules:
-      const shouldIncomingOverride = this.shouldOverrideField(key, incomingSource, exSource);
+      // If incoming is from the SAME source, it is a chronological amendment/version update, not an inter-source conflict
+      if (incomingSource === exSource) {
+        (resolved as unknown as Record<string, unknown>)[key] = incVal;
+        if (incomingProv[key]) {
+          (resolvedProvenance as unknown as Record<string, unknown>)[key] = incomingProv[key];
+        }
+        continue;
+      }
+
+      // Cross-source discrepancy detected! Apply field-specific authority rules with Tier-1 Conflict Freeze
+      const { shouldOverride, rule } = this.evaluateFieldAuthority(key, incomingSource, exSource);
 
       const conflict: IngestionConflictDetail = {
         field: key,
@@ -104,21 +120,45 @@ export class CanonicalIpoResolver {
         existing_source: exSource || 'sebi',
         incoming_value: incVal,
         incoming_source: incomingSource,
-        resolved_value: shouldIncomingOverride ? incVal : exVal,
-        resolution_rule: shouldIncomingOverride
-          ? `${incomingSource} overrules ${exSource || 'current'} for ${key}`
-          : `${exSource || 'current'} retained over ${incomingSource} for ${key}`,
+        resolved_value: shouldOverride ? incVal : exVal,
+        resolution_rule: rule,
       };
 
       conflicts.push(conflict);
 
-      if (shouldIncomingOverride) {
+      if (shouldOverride) {
         (resolved as unknown as Record<string, unknown>)[key] = incVal;
         if (incomingProv[key]) {
           (resolvedProvenance as unknown as Record<string, unknown>)[key] = incomingProv[key];
         }
       }
     }
+
+    // Derive deterministic, explainable business lifecycle
+    const lifecycle = deriveExplainableIPOStatus({
+      open_date: resolved.open_date,
+      close_date: resolved.close_date,
+      allotment_date: resolved.allotment_date,
+      listing_date: resolved.listing_date,
+      status: resolved.business_status,
+      nowIST: options?.nowIST,
+    });
+    resolved.business_status = lifecycle.finalStatus as NormalizedIpoMasterPayload['business_status'];
+
+    // Calculate freshness
+    const latestObsTime = incomingProv.company_name?.observed_at || new Date().toISOString();
+    const freshnessGrade = this.calculateFreshness(latestObsTime);
+    const freshness: RecordFreshnessMeta = {
+      last_observed_at: latestObsTime,
+      last_authoritative_observed_at: latestObsTime,
+      data_freshness: freshnessGrade,
+      field_freshness: {
+        price_band: freshnessGrade,
+        dates: freshnessGrade,
+        listing_status: freshnessGrade,
+      },
+      source_health: 'healthy',
+    };
 
     return {
       canonical_name: resolved.company_name,
@@ -128,21 +168,48 @@ export class CanonicalIpoResolver {
       conflict_details: conflicts,
       resolved_payload: resolved,
       resolved_provenance: resolvedProvenance,
+      lifecycle,
+      freshness,
     };
+  }
+
+  private static isTier1Source(source?: string): boolean {
+    return source === 'sebi' || source === 'nse' || source === 'bse';
   }
 
   /**
    * Field-level authority precedence evaluation.
+   * Guardrail 2: If both sources are Tier-1 and conflict, DO NOT AUTO-OVERWRITE.
    */
-  private static shouldOverrideField(
+  public static evaluateFieldAuthority(
     field: keyof NormalizedIpoMasterPayload,
     incomingSource: string,
     existingSource?: string
-  ): boolean {
+  ): { shouldOverride: boolean; rule: string; isTier1Conflict: boolean } {
+    if (!existingSource) {
+      return { shouldOverride: true, rule: 'initial_value_adopted', isTier1Conflict: false };
+    }
+
+    const incomingIsTier1 = this.isTier1Source(incomingSource);
+    const existingIsTier1 = this.isTier1Source(existingSource);
+
+    // Guardrail 2: Tier-1 vs Tier-1 Conflict Freeze
+    if (incomingIsTier1 && existingIsTier1 && incomingSource !== existingSource) {
+      return {
+        shouldOverride: false,
+        rule: `TIER1_CONFLICT_FROZEN: Disagreement between ${existingSource} and ${incomingSource} on ${field} requires administrator review`,
+        isTier1Conflict: true,
+      };
+    }
+
     // 1. Legal Name and Regulatory Offer Documents: SEBI is Tier 1 Authoritative
     if (field === 'company_name' || field === 'drhp_url' || field === 'rhp_url' || field === 'prospectus_url') {
-      if (incomingSource === 'sebi') return true;
-      if (existingSource === 'sebi') return false;
+      if (incomingSource === 'sebi') {
+        return { shouldOverride: true, rule: 'sebi_legal_document_authority', isTier1Conflict: false };
+      }
+      if (existingSource === 'sebi') {
+        return { shouldOverride: false, rule: 'sebi_legal_document_retained', isTier1Conflict: false };
+      }
     }
 
     // 2. Operational Parameters (Price Band, Lot Size, Dates, Symbol, Exchange): Exchange overrules all
@@ -152,16 +219,42 @@ export class CanonicalIpoResolver {
       field === 'lot_size' ||
       field === 'open_date' ||
       field === 'close_date' ||
+      field === 'listing_date' ||
       field === 'symbol' ||
       field === 'exchange'
     ) {
-      if (incomingSource === 'nse' || incomingSource === 'bse') return true;
-      if (existingSource === 'nse' || existingSource === 'bse') return false;
-      if (incomingSource === 'upstox') return true; // Upstox provides operational over SEBI doc
+      if (incomingSource === 'nse' || incomingSource === 'bse') {
+        return { shouldOverride: true, rule: `${incomingSource}_exchange_authority_over_${existingSource}`, isTier1Conflict: false };
+      }
+      if (existingSource === 'nse' || existingSource === 'bse') {
+        return { shouldOverride: false, rule: `${existingSource}_exchange_authority_retained_over_${incomingSource}`, isTier1Conflict: false };
+      }
+      // SEBI has regulatory document authority but not live operational trading parameters
+      if (existingSource === 'sebi') {
+        return { shouldOverride: true, rule: `${incomingSource}_operational_parameter_over_sebi_regulatory`, isTier1Conflict: false };
+      }
     }
 
-    // Default: retain existing unless incoming is higher tier
-    return false;
+    // Tier 1 over Tier 2/3
+    if (incomingIsTier1 && !existingIsTier1) {
+      return { shouldOverride: true, rule: `tier1_${incomingSource}_overrules_tier2_${existingSource}`, isTier1Conflict: false };
+    }
+    if (!incomingIsTier1 && existingIsTier1) {
+      return { shouldOverride: false, rule: `tier1_${existingSource}_retained_over_tier2_${incomingSource}`, isTier1Conflict: false };
+    }
+
+    return { shouldOverride: false, rule: 'default_retain_existing', isTier1Conflict: false };
+  }
+
+  public static calculateFreshness(lastObservedAt: string, now: Date = new Date()): FreshnessGrade {
+    const observedTime = new Date(lastObservedAt).getTime();
+    if (isNaN(observedTime)) return 'stale';
+    const diffHours = (now.getTime() - observedTime) / (1000 * 60 * 60);
+
+    if (diffHours < 6) return 'fresh';
+    if (diffHours < 24) return 'aging';
+    if (diffHours < 72) return 'stale';
+    return 'very_stale';
   }
 
   public static sanitizeCompanyName(name: string): string {

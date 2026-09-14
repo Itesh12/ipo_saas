@@ -6,6 +6,8 @@
  * field-level provenance, canonical identity matching, and staging inbox review.
  */
 
+import type { IPOStatus } from '../../ipo/types/ipo.types';
+
 export type SourceAuthorityTier =
   | 'official_regulatory' // Tier 1: SEBI
   | 'official_exchange'   // Tier 1: NSE, BSE
@@ -25,11 +27,52 @@ export type IngestionDocumentType =
   | 'UDRHP';
 
 export type IngestionReviewStatus =
-  | 'pending'
-  | 'promoted_to_draft'
-  | 'promoted_to_published'
-  | 'rejected'
-  | 'archived';
+  | 'candidate'           // Initial discovered filing, identity or parameters not yet established
+  | 'identity_resolved'   // Identity established across official sources, awaiting review
+  | 'pending'             // Queued for editorial review
+  | 'pending_review'      // Complete canonical record ready for sign-off
+  | 'conflict_detected'   // Discrepancy between Tier-1 sources, requires admin resolution
+  | 'promoted_to_draft'   // Approved by admin, draft created in ipos table
+  | 'promoted_to_published'// Formally published to public directory
+  | 'rejected'            // Excluded (e.g. debt, rights, withdrawn)
+  | 'archived';           // Historical or superseded record
+
+export type FreshnessGrade = 'fresh' | 'aging' | 'stale' | 'very_stale';
+
+export interface RecordFreshnessMeta {
+  last_observed_at: string;
+  last_authoritative_observed_at: string;
+  data_freshness: FreshnessGrade;
+  field_freshness: {
+    price_band: FreshnessGrade;
+    dates: FreshnessGrade;
+    listing_status: FreshnessGrade;
+  };
+  source_health: 'healthy' | 'degraded' | 'unreachable';
+}
+
+export interface DiscoveredIpoCandidate {
+  company_name: string;
+  document_title: string;
+  document_type: IngestionDocumentType;
+  document_url: string;
+  filing_date: string;
+  source: IngestionSource;
+  lead_managers?: string[];
+  symbol?: string | null;
+  isin?: string | null;
+  bse_code?: string | null;
+  category?: 'mainboard' | 'sme' | null;
+  price_band_low?: number | null;
+  price_band_high?: number | null;
+  lot_size?: number | null;
+  issue_size_cr?: number | null;
+  open_date?: string | null;
+  close_date?: string | null;
+  listing_date?: string | null;
+  is_equity: boolean;
+  is_withdrawn: boolean;
+}
 
 export interface FieldProvenance<T = unknown> {
   value: T;
@@ -62,7 +105,7 @@ export interface NormalizedIpoMasterPayload {
   prospectus_url?: string | null;
   registrar?: string | null;
   lead_managers?: string[];
-  business_status?: 'upcoming' | 'open' | 'closed' | 'listed' | null;
+  business_status?: IPOStatus | null;
 }
 
 export type IpoProvenanceMap = {

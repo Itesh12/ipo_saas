@@ -19,15 +19,17 @@ interface ThemeSwitcherProps {
   className?: string;
 }
 
+const emptySubscribe = () => () => {};
+
 export function ThemeSwitcher({ variant = "dropdown", className }: ThemeSwitcherProps) {
   const { preference, setThemePreference } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = React.useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
 
   // Close dropdown when clicking outside
   useEffect(() => {

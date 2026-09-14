@@ -63,5 +63,13 @@ export * from './adapters/bseExtractor';
 export * from './adapters/upstoxAdapter';
 export * from './services/canonicalIpoResolver';
 export * from './services/ipoIngestionService';
+export * from './services/ipoDiscoveryEngine';
 export * from './actions/ingestionActions';
+
+// Stage 3A.2: Live Source Acquisition Clients & Continuous Sync
+export * from './clients/sebiSourceClient';
+export * from './clients/nseSourceClient';
+export * from './clients/bseSourceClient';
+export * from './services/ipoSyncService';
+
 

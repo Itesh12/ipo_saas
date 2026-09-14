@@ -17,11 +17,13 @@ import {
   UpstoxIpoAdapter,
   CanonicalIpoResolver,
   IpoIngestionService,
+  IpoDiscoveryEngine,
   CapabilityNotAvailableError,
   NormalizedIpoMasterPayload,
   IpoProvenanceMap,
   CanonicalInboxRecord,
 } from '../features/external-integrations';
+import { deriveExplainableIPOStatus } from '../features/ipo/services/ipoLifecycle';
 
 describe('Phase 9 Stage 3A: Broker-Independent Real IPO Master Data Engine', () => {
 
@@ -287,4 +289,179 @@ describe('Phase 9 Stage 3A: Broker-Independent Real IPO Master Data Engine', () 
       assert.strictEqual(res.reasons.length, 0);
     });
   });
+
+  // ============================================================================
+  // 7. Explainable Lifecycle Derivation (Deterministic IST Clock)
+  // ============================================================================
+  describe('7. Explainable Lifecycle Derivation with Deterministic IST Clock', () => {
+    it('7.1 accurately derives upcoming status before bidding opens in IST', () => {
+      const result = deriveExplainableIPOStatus({
+        open_date: '2026-09-15',
+        close_date: '2026-09-18',
+        listing_date: '2026-09-24',
+        nowIST: '2026-09-14',
+      });
+      assert.strictEqual(result.finalStatus, 'upcoming');
+      assert.strictEqual(result.statusSource, 'bidding_window');
+      assert.strictEqual(result.reason, 'bidding_starts_future');
+    });
+
+    it('7.2 accurately derives open status on opening day and during bidding window in IST', () => {
+      const resultOpening = deriveExplainableIPOStatus({
+        open_date: '2026-09-15',
+        close_date: '2026-09-18',
+        listing_date: '2026-09-24',
+        nowIST: '2026-09-15',
+      });
+      assert.strictEqual(resultOpening.finalStatus, 'open');
+
+      const resultMid = deriveExplainableIPOStatus({
+        open_date: '2026-09-15',
+        close_date: '2026-09-18',
+        listing_date: '2026-09-24',
+        nowIST: '2026-09-17',
+      });
+      assert.strictEqual(resultMid.finalStatus, 'open');
+    });
+
+    it('7.3 accurately derives closed status after close date and does NOT manufacture allotment without evidence', () => {
+      const result = deriveExplainableIPOStatus({
+        open_date: '2026-09-15',
+        close_date: '2026-09-18',
+        allotment_date: '2026-09-21',
+        listing_date: '2026-09-24',
+        nowIST: '2026-09-22',
+        allotmentFinalizedEvidence: false, // No authoritative evidence
+      });
+      assert.strictEqual(result.finalStatus, 'closed');
+      assert.strictEqual(result.reason, 'bidding_closed_awaiting_allotment');
+    });
+
+    it('7.4 derives listed status once listing date arrives in IST', () => {
+      const result = deriveExplainableIPOStatus({
+        open_date: '2026-09-15',
+        close_date: '2026-09-18',
+        listing_date: '2026-09-24',
+        nowIST: '2026-09-24',
+      });
+      assert.strictEqual(result.finalStatus, 'listed');
+      assert.strictEqual(result.statusSource, 'authoritative_listing');
+    });
+
+    it('7.5 respects explicit withdrawn or cancelled status regardless of dates', () => {
+      const result = deriveExplainableIPOStatus({
+        open_date: '2026-09-15',
+        close_date: '2026-09-18',
+        status: 'withdrawn',
+        nowIST: '2026-09-16',
+      });
+      assert.strictEqual(result.finalStatus, 'withdrawn');
+      assert.strictEqual(result.statusSource, 'explicit_override');
+    });
+  });
+
+  // ============================================================================
+  // 8. Guardrail 2: Tier-1 Disagreement Freeze & Field-Level Authority
+  // ============================================================================
+  describe('8. Guardrail 2: Tier-1 Disagreement Freeze', () => {
+    it('8.1 freezes when two Tier-1 sources (NSE vs BSE) disagree on price band without auto-overwrite', () => {
+      const existingPayload: NormalizedIpoMasterPayload = {
+        company_name: 'Test Contested IPO Ltd',
+        price_band_high: 94, // BSE value
+      };
+      const existingProv: IpoProvenanceMap = {
+        price_band_high: { value: 94, source: 'bse' as const, observed_at: '2026-09-11T10:00:00Z', confidence: 'official_exchange' as const, is_official: true },
+      };
+
+      const incomingFromNse = {
+        source: 'nse' as const,
+        external_id: 'nse-contested-01',
+        document_type: 'IPO_MASTER' as const,
+        raw_payload: {},
+        normalized_payload: {
+          company_name: 'Test Contested IPO Ltd',
+          price_band_high: 99, // NSE value (disagrees!)
+        },
+        provenance: {
+          price_band_high: { value: 99, source: 'nse' as const, observed_at: '2026-09-11T11:00:00Z', confidence: 'official_exchange' as const, is_official: true },
+        },
+      };
+
+      const outcome = CanonicalIpoResolver.resolveObservation(existingPayload, existingProv, incomingFromNse);
+
+      // Guardrail 2 assertion: Must NOT auto-overwrite; must freeze existing value and flag conflict
+      assert.strictEqual(outcome.has_conflict, true, 'Disagreement between Tier-1 sources must be flagged as conflict');
+      assert.strictEqual(outcome.resolved_payload.price_band_high, 94, 'Must freeze existing value rather than auto-overwriting');
+      const conflict = outcome.conflict_details.find(c => c.field === 'price_band_high');
+      assert.ok(conflict, 'Conflict detail must exist for price_band_high');
+      assert.ok(conflict.resolution_rule.includes('TIER1_CONFLICT_FROZEN'), 'Rule must specify TIER1_CONFLICT_FROZEN');
+    });
+
+    it('8.2 successfully resolves Tier-1 over Tier-2 without freezing', () => {
+      const auth = CanonicalIpoResolver.evaluateFieldAuthority('price_band_high', 'nse', 'upstox');
+      assert.strictEqual(auth.shouldOverride, true);
+      assert.strictEqual(auth.isTier1Conflict, false);
+      assert.ok(auth.rule.includes('exchange_authority_over_upstox') || auth.rule.includes('tier1_nse'));
+    });
+  });
+
+  // ============================================================================
+  // 9. Universe Classification & Candidate Separation
+  // ============================================================================
+  describe('9. Universe Classification & Document Classification', () => {
+    it('9.1 correctly classifies DRHP, RHP, Prospectus, Addendum', () => {
+      const drhp = IpoDiscoveryEngine.classifyDocument('Draft Red Herring Prospectus of ABC Ltd');
+      assert.strictEqual(drhp.documentType, 'DRHP');
+      assert.strictEqual(drhp.isEquityIpo, true);
+      assert.strictEqual(drhp.isExcluded, false);
+
+      const rhp = IpoDiscoveryEngine.classifyDocument('Red Herring Prospectus of XYZ Ltd');
+      assert.strictEqual(rhp.documentType, 'RHP');
+      assert.strictEqual(rhp.isExcluded, false);
+
+      const corrigendum = IpoDiscoveryEngine.classifyDocument('Corrigendum to RHP for XYZ Ltd');
+      assert.strictEqual(corrigendum.documentType, 'ADDENDUM');
+      assert.strictEqual(corrigendum.isExcluded, false);
+    });
+
+    it('9.2 excludes debt, NCDs, rights issues, and withdrawn filings', () => {
+      const debt = IpoDiscoveryEngine.classifyDocument('Public Issue of Secured NCDs by Finance Corp');
+      assert.strictEqual(debt.isExcluded, true);
+      assert.ok(debt.exclusionReason?.includes('Debt/Bond/NCD'));
+
+      const rights = IpoDiscoveryEngine.classifyDocument('Offer of Equity Shares on Rights Issue Basis');
+      assert.strictEqual(rights.isExcluded, true);
+      assert.ok(rights.exclusionReason?.includes('Rights issue'));
+
+      const withdrawn = IpoDiscoveryEngine.classifyDocument('Withdrawal of DRHP by Tech Ltd', 'cancelled');
+      assert.strictEqual(withdrawn.isExcluded, true);
+      assert.ok(withdrawn.exclusionReason?.includes('withdrawn'));
+    });
+  });
+
+  // ============================================================================
+  // 10. Freshness Grading
+  // ============================================================================
+  describe('10. Freshness Grading Calculation', () => {
+    it('10.1 returns correct grades for observation ages', () => {
+      const now = new Date('2026-09-11T12:00:00Z');
+
+      // <6 hours -> fresh
+      const freshObs = new Date('2026-09-11T09:00:00Z').toISOString();
+      assert.strictEqual(CanonicalIpoResolver.calculateFreshness(freshObs, now), 'fresh');
+
+      // 6-24 hours -> aging
+      const agingObs = new Date('2026-09-10T20:00:00Z').toISOString();
+      assert.strictEqual(CanonicalIpoResolver.calculateFreshness(agingObs, now), 'aging');
+
+      // 24-72 hours -> stale
+      const staleObs = new Date('2026-09-09T12:00:00Z').toISOString();
+      assert.strictEqual(CanonicalIpoResolver.calculateFreshness(staleObs, now), 'stale');
+
+      // >72 hours -> very_stale
+      const veryStaleObs = new Date('2026-09-01T12:00:00Z').toISOString();
+      assert.strictEqual(CanonicalIpoResolver.calculateFreshness(veryStaleObs, now), 'very_stale');
+    });
+  });
 });
+
