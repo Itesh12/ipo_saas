@@ -49,5 +49,6 @@ export function calculateGMPEstimate(
   };
 }
 
-export const GMP_DISCLAIMER_TEXT =
-  "Grey Market Premium (GMP) is an unofficial, unregulated market sentiment indicator based on non-exchange trades. It does not represent an official NSE/BSE quote and does not guarantee listing price or trading returns.";
+import { GMP_DISCLAIMER_V1 } from "@/features/external-integrations/gmp/gmpCompliance";
+
+export const GMP_DISCLAIMER_TEXT = GMP_DISCLAIMER_V1;

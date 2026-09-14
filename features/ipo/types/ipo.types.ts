@@ -12,6 +12,7 @@ export type IPOPromoterRow = Database["public"]["Tables"]["ipo_promoters"]["Row"
 export type IPOStrengthRow = Database["public"]["Tables"]["ipo_strengths"]["Row"];
 export type IPORiskRow = Database["public"]["Tables"]["ipo_risks"]["Row"];
 export type IPOGMPEntryRow = Database["public"]["Tables"]["ipo_gmp_entries"]["Row"];
+export type IPOGMPObservationRow = Database["public"]["Tables"]["ipo_gmp_observations"]["Row"];
 export type IPOSubscriptionSnapshotRow = Database["public"]["Tables"]["ipo_subscription_snapshots"]["Row"];
 export type IPOSubscriptionObservationRow = Database["public"]["Tables"]["ipo_subscription_observations"]["Row"];
 export type IPOAllotmentEventRow = Database["public"]["Tables"]["ipo_allotment_events"]["Row"];
@@ -26,6 +27,9 @@ export type SubscriptionFeedScope = Database["public"]["Enums"]["subscription_fe
 export type SubscriptionAnomalyStatus = Database["public"]["Enums"]["subscription_anomaly_status"];
 export type RegistrarQueryState = Database["public"]["Enums"]["registrar_query_state"];
 export type IPOAllotmentLifecycleState = Database["public"]["Enums"]["ipo_allotment_lifecycle_state"];
+export type GMPTrendDirection = Database["public"]["Enums"]["gmp_trend_direction"];
+export type GMPAnomalyStatus = Database["public"]["Enums"]["gmp_anomaly_status"];
+export type GMPFreshnessState = Database["public"]["Enums"]["gmp_freshness_state"];
 
 export type IPOCategory = Database["public"]["Enums"]["ipo_category"];
 export type IPOIssueType = Database["public"]["Enums"]["ipo_issue_type"];

@@ -78,6 +78,17 @@ export type IPOAllotmentLifecycleState =
   | "demat_credited"
   | "listed";
 
+export type GMPTrendDirection = "rising" | "falling" | "stable";
+
+export type GMPAnomalyStatus =
+  | "valid"
+  | "outlier"
+  | "spike_quarantined"
+  | "stale_post_listing"
+  | "invalid";
+
+export type GMPFreshnessState = "fresh" | "aging" | "stale" | "expired";
+
 export type IPORiskSeverity = "low" | "medium" | "high";
 
 export type IPOSentiment = "positive" | "neutral" | "negative" | "cautious";
@@ -757,6 +768,18 @@ export interface Database {
           source_url: string | null;
           notes: string | null;
           created_at: string;
+          latest_observation_id?: string | null;
+          source_count?: number;
+          source_spread_pct?: number | null;
+          kostak_rate?: number | null;
+          subject_to_sauda_rate?: number | null;
+          trend_direction?: GMPTrendDirection;
+          day_change_value?: number;
+          day_change_pct?: number;
+          freshness_state?: GMPFreshnessState;
+          policy_version?: string;
+          is_post_listing_frozen?: boolean;
+          updated_at?: string;
         };
         Insert: {
           id?: string;
@@ -771,6 +794,18 @@ export interface Database {
           source_url?: string | null;
           notes?: string | null;
           created_at?: string;
+          latest_observation_id?: string | null;
+          source_count?: number;
+          source_spread_pct?: number | null;
+          kostak_rate?: number | null;
+          subject_to_sauda_rate?: number | null;
+          trend_direction?: GMPTrendDirection;
+          day_change_value?: number;
+          day_change_pct?: number;
+          freshness_state?: GMPFreshnessState;
+          policy_version?: string;
+          is_post_listing_frozen?: boolean;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -784,6 +819,86 @@ export interface Database {
           source?: string;
           source_url?: string | null;
           notes?: string | null;
+          created_at?: string;
+          latest_observation_id?: string | null;
+          source_count?: number;
+          source_spread_pct?: number | null;
+          kostak_rate?: number | null;
+          subject_to_sauda_rate?: number | null;
+          trend_direction?: GMPTrendDirection;
+          day_change_value?: number;
+          day_change_pct?: number;
+          freshness_state?: GMPFreshnessState;
+          policy_version?: string;
+          is_post_listing_frozen?: boolean;
+          updated_at?: string;
+        };
+      };
+      ipo_gmp_observations: {
+        Row: {
+          id: string;
+          ipo_id: string;
+          source_observation_id: string | null;
+          source_observation_uid: string;
+          source_observation_hash: string;
+          gmp_source: string;
+          source_family: string;
+          publisher_id: string;
+          upstream_source_id: string | null;
+          independence_group: string;
+          quote_time: string;
+          reported_gmp_value: number | null;
+          reported_kostak: number | null;
+          reported_subject_to_sauda: number | null;
+          sauda_condition_notes: string | null;
+          anomaly_status: GMPAnomalyStatus;
+          anomaly_reason: string | null;
+          validation_status: IPOVerificationStatus;
+          raw_payload_hash: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id: string;
+          source_observation_id?: string | null;
+          source_observation_uid: string;
+          source_observation_hash: string;
+          gmp_source: string;
+          source_family?: string;
+          publisher_id: string;
+          upstream_source_id?: string | null;
+          independence_group: string;
+          quote_time: string;
+          reported_gmp_value?: number | null;
+          reported_kostak?: number | null;
+          reported_subject_to_sauda?: number | null;
+          sauda_condition_notes?: string | null;
+          anomaly_status?: GMPAnomalyStatus;
+          anomaly_reason?: string | null;
+          validation_status?: IPOVerificationStatus;
+          raw_payload_hash: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string;
+          source_observation_id?: string | null;
+          source_observation_uid?: string;
+          source_observation_hash?: string;
+          gmp_source?: string;
+          source_family?: string;
+          publisher_id?: string;
+          upstream_source_id?: string | null;
+          independence_group?: string;
+          quote_time?: string;
+          reported_gmp_value?: number | null;
+          reported_kostak?: number | null;
+          reported_subject_to_sauda?: number | null;
+          sauda_condition_notes?: string | null;
+          anomaly_status?: GMPAnomalyStatus;
+          anomaly_reason?: string | null;
+          validation_status?: IPOVerificationStatus;
+          raw_payload_hash?: string;
           created_at?: string;
         };
       };
@@ -2111,6 +2226,9 @@ export interface Database {
       subscription_anomaly_status: SubscriptionAnomalyStatus;
       registrar_query_state: RegistrarQueryState;
       ipo_allotment_lifecycle_state: IPOAllotmentLifecycleState;
+      gmp_trend_direction: GMPTrendDirection;
+      gmp_anomaly_status: GMPAnomalyStatus;
+      gmp_freshness_state: GMPFreshnessState;
     };
   };
 }

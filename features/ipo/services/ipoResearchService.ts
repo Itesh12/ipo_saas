@@ -153,7 +153,17 @@ export async function getLiveGMPTrackerList(): Promise<GMPTrackerItem[]> {
           estimated_listing_gain_pct,
           confidence_level,
           observed_at,
-          source
+          source,
+          source_count,
+          source_spread_pct,
+          kostak_rate,
+          subject_to_sauda_rate,
+          trend_direction,
+          day_change_value,
+          day_change_pct,
+          freshness_state,
+          policy_version,
+          is_post_listing_frozen
         )
       `)
       .eq("publication_status", "published")
