@@ -158,6 +158,63 @@ export async function promoteInboxItemToDraft(inboxId: string) {
   return { success: true, ipoId: res.ipoId };
 }
 
+/**
+ * Phase 9 Stage 3B: Synchronize regulatory offer documents for a canonical IPO.
+ */
+export async function syncIpoDocumentsAction(ipoId: string) {
+  const adminUser = await requireRole('admin');
+  const { documentSyncService } = await import('../documents/documentSyncService');
+  const result = await documentSyncService.syncDocumentsForIpo(ipoId);
+
+  await AuditLoggingService.recordAudit({
+    actorId: adminUser.id,
+    action: 'SYNC_IPO_DOCUMENTS',
+    resourceType: 'IPO_DOCUMENTS',
+    resourceId: ipoId,
+    newValues: { result },
+  });
+
+  return result;
+}
+
+/**
+ * Phase 9 Stage 3B: Synchronize all discovered documents from ingestion observations.
+ */
+export async function syncAllDiscoveredDocumentsAction() {
+  const adminUser = await requireRole('admin');
+  const { documentSyncService } = await import('../documents/documentSyncService');
+  const result = await documentSyncService.syncAllDiscoveredObservations();
+
+  await AuditLoggingService.recordAudit({
+    actorId: adminUser.id,
+    action: 'SYNC_ALL_DISCOVERED_DOCUMENTS',
+    resourceType: 'IPO_DOCUMENTS',
+    newValues: { result },
+  });
+
+  return result;
+}
+
+/**
+ * Phase 9 Stage 3B: Fetch unassociated documents for admin review.
+ */
+export async function getUnassociatedDocumentsAction() {
+  await requireRole('admin');
+  const { createClient } = await import('@/lib/supabase/server');
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('ipo_unassociated_documents')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to query unassociated documents: ${error.message}`);
+  }
+
+  return data || [];
+}
+
 export async function directPublishInboxItem(inboxId: string) {
   const res = await approveAndPublishCandidateAction(inboxId);
   return { success: true, ipoId: res.ipoId };

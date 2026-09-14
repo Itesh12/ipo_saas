@@ -43,6 +43,11 @@ export type IPODocType =
   | "presentation"
   | "financials"
   | "notice"
+  | "addendum"
+  | "corrigendum"
+  | "anchor_allocation"
+  | "basis_of_allotment"
+  | "abridged_prospectus"
   | "other";
 
 export type IPORiskSeverity = "low" | "medium" | "high";
@@ -902,6 +907,15 @@ export interface Database {
           source: string;
           published_at: string | null;
           created_at: string;
+          source_observation_id: string | null;
+          version_number: number;
+          sha256_hash: string | null;
+          probe_hash: string | null;
+          mime_type: string;
+          validation_status: IPOVerificationStatus;
+          metadata: Json;
+          first_observed_at: string;
+          last_verified_at: string;
         };
         Insert: {
           id?: string;
@@ -914,6 +928,15 @@ export interface Database {
           source?: string;
           published_at?: string | null;
           created_at?: string;
+          source_observation_id?: string | null;
+          version_number?: number;
+          sha256_hash?: string | null;
+          probe_hash?: string | null;
+          mime_type?: string;
+          validation_status?: IPOVerificationStatus;
+          metadata?: Json;
+          first_observed_at?: string;
+          last_verified_at?: string;
         };
         Update: {
           id?: string;
@@ -926,6 +949,65 @@ export interface Database {
           source?: string;
           published_at?: string | null;
           created_at?: string;
+          source_observation_id?: string | null;
+          version_number?: number;
+          sha256_hash?: string | null;
+          probe_hash?: string | null;
+          mime_type?: string;
+          validation_status?: IPOVerificationStatus;
+          metadata?: Json;
+          first_observed_at?: string;
+          last_verified_at?: string;
+        };
+      };
+      ipo_unassociated_documents: {
+        Row: {
+          id: string;
+          source_observation_id: string | null;
+          filing_title: string;
+          document_type: IPODocType;
+          file_url: string;
+          extracted_company_name: string | null;
+          reconciliation_score: number | null;
+          reconciliation_reason: string | null;
+          status: string;
+          candidate_ipo_ids: string[];
+          metadata: Json;
+          created_at: string;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          source_observation_id?: string | null;
+          filing_title: string;
+          document_type?: IPODocType;
+          file_url: string;
+          extracted_company_name?: string | null;
+          reconciliation_score?: number | null;
+          reconciliation_reason?: string | null;
+          status?: string;
+          candidate_ipo_ids?: string[];
+          metadata?: Json;
+          created_at?: string;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+        };
+        Update: {
+          id?: string;
+          source_observation_id?: string | null;
+          filing_title?: string;
+          document_type?: IPODocType;
+          file_url?: string;
+          extracted_company_name?: string | null;
+          reconciliation_score?: number | null;
+          reconciliation_reason?: string | null;
+          status?: string;
+          candidate_ipo_ids?: string[];
+          metadata?: Json;
+          created_at?: string;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
         };
       };
       ipo_news: {
