@@ -16,11 +16,11 @@ for (const line of envContent.split('\n')) {
 const supabase = createClient(envVars['NEXT_PUBLIC_SUPABASE_URL'], envVars['SUPABASE_SERVICE_ROLE_KEY']);
 
 async function check() {
-  const { data, error } = await supabase.from('ipo_source_sync_runs').select('*').limit(1);
+  const { data, error } = await supabase.from('ipo_documents').select('id, source_observation_id, version_number, validation_status').limit(1);
   if (error) {
-    console.error('Error selecting ipo_source_sync_runs:', error);
+    console.error('Error selecting ipo_documents:', error);
   } else {
-    console.log('Successfully queried ipo_source_sync_runs. Row count:', data.length);
+    console.log('Successfully queried ipo_documents. Sample row:', data);
   }
 }
 

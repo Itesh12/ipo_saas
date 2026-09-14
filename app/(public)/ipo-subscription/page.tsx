@@ -38,7 +38,8 @@ export default async function IpoSubscriptionPage() {
                   <th className="py-3 px-4 font-semibold">IPO Company</th>
                   <th className="py-3 px-4 font-semibold">Issue Size</th>
                   <th className="py-3 px-4 text-right font-semibold">QIB (x)</th>
-                  <th className="py-3 px-4 text-right font-semibold">NII (x)</th>
+                  <th className="py-3 px-4 text-right font-semibold">bHNI (x)</th>
+                  <th className="py-3 px-4 text-right font-semibold">sHNI (x)</th>
                   <th className="py-3 px-4 text-right font-semibold">Retail (x)</th>
                   <th className="py-3 px-4 text-right font-bold text-[var(--brand-primary)]">Overall (x)</th>
                   <th className="py-3 px-4 font-semibold">Day Status</th>
@@ -51,6 +52,8 @@ export default async function IpoSubscriptionPage() {
                     day_number: number;
                     qib_x: number | null;
                     nii_x: number | null;
+                    b_hni_x?: number | null;
+                    s_hni_x?: number | null;
                     retail_x: number | null;
                     overall_x: number;
                   }[];
@@ -80,7 +83,11 @@ export default async function IpoSubscriptionPage() {
                       </td>
 
                       <td className="py-3 px-4 text-right font-medium">
-                        {latest ? formatSubscriptionMultiple(latest.nii_x) : "—"}
+                        {latest ? formatSubscriptionMultiple(latest.b_hni_x ?? latest.nii_x) : "—"}
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-medium">
+                        {latest ? formatSubscriptionMultiple(latest.s_hni_x ?? latest.nii_x) : "—"}
                       </td>
 
                       <td className="py-3 px-4 text-right font-medium">

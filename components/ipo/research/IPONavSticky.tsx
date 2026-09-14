@@ -18,6 +18,7 @@ const SECTIONS: SectionItem[] = [
   { id: "strengths-risks", label: "Strengths & Risks" },
   { id: "gmp", label: "GMP Trend" },
   { id: "subscription", label: "Subscription" },
+  { id: "allotment", label: "Allotment" },
   { id: "score", label: "IPO Score" },
   { id: "documents", label: "Documents" },
   { id: "news", label: "News" },

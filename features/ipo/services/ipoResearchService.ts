@@ -19,6 +19,10 @@ import {
   IPOScoreRow,
   IPODocumentRow,
   IPONewsRow,
+  IPOAllotmentFactRow,
+  IPOAllotmentEstimateRow,
+  IPORegistrarPortalStatusRow,
+  IPOAllotmentEventRow,
   GMPTrackerItem,
   SubscriptionTrackerItem,
 } from "../types/ipo.types";
@@ -47,6 +51,10 @@ export async function getIPOResearchBundle(slug: string): Promise<IPOResearchBun
       scoreRes,
       docsRes,
       newsRes,
+      factsRes,
+      estimatesRes,
+      portalRes,
+      eventsRes,
     ] = await Promise.all([
       supabase.from("ipo_business_profiles").select("*").eq("ipo_id", ipo.id).maybeSingle(),
       supabase.from("ipo_financials").select("*").eq("ipo_id", ipo.id).order("financial_year", { ascending: true }),
@@ -60,6 +68,10 @@ export async function getIPOResearchBundle(slug: string): Promise<IPOResearchBun
       supabase.from("ipo_scores").select("*").eq("ipo_id", ipo.id).maybeSingle(),
       supabase.from("ipo_documents").select("*").eq("ipo_id", ipo.id),
       supabase.from("ipo_news").select("*").eq("ipo_id", ipo.id).order("published_at", { ascending: false }),
+      supabase.from("ipo_allotment_facts").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+      supabase.from("ipo_allotment_estimates").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+      supabase.from("ipo_registrar_portal_status").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+      supabase.from("ipo_allotment_events").select("*").eq("ipo_id", ipo.id).order("event_time", { ascending: true }),
     ]);
 
     const gmpList = (gmpRes.data || []) as unknown as IPOGMPEntryRow[];
@@ -81,6 +93,10 @@ export async function getIPOResearchBundle(slug: string): Promise<IPOResearchBun
       score: (scoreRes.data as unknown as IPOScoreRow) || null,
       documents: (docsRes.data as unknown as IPODocumentRow[]) || [],
       news: (newsRes.data as unknown as IPONewsRow[]) || [],
+      allotmentFacts: (factsRes?.data as unknown as IPOAllotmentFactRow) || null,
+      allotmentEstimates: (estimatesRes?.data as unknown as IPOAllotmentEstimateRow) || null,
+      registrarPortalStatus: (portalRes?.data as unknown as IPORegistrarPortalStatusRow) || null,
+      allotmentEvents: (eventsRes?.data as unknown as IPOAllotmentEventRow[]) || [],
     };
   } catch (error) {
     console.error("Error fetching IPO research bundle:", error);
@@ -101,6 +117,10 @@ export async function getIPOResearchBundle(slug: string): Promise<IPOResearchBun
       score: null,
       documents: [],
       news: [],
+      allotmentFacts: null,
+      allotmentEstimates: null,
+      registrarPortalStatus: null,
+      allotmentEvents: [],
     };
   }
 }
@@ -173,6 +193,8 @@ export async function getLiveSubscriptionTrackerList(): Promise<SubscriptionTrac
           snapshot_time,
           qib_x,
           nii_x,
+          b_hni_x,
+          s_hni_x,
           retail_x,
           employee_x,
           overall_x,

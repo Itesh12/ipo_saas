@@ -13,6 +13,7 @@ import { IPOFinancialsTable } from "@/components/ipo/research/IPOFinancialsTable
 import { IPOValuationPeers } from "@/components/ipo/research/IPOValuationPeers";
 import { IPOGMPCard } from "@/components/ipo/research/IPOGMPCard";
 import { IPOSubscriptionCard } from "@/components/ipo/research/IPOSubscriptionCard";
+import { IPOAllotmentCard } from "@/components/ipo/research/IPOAllotmentCard";
 import { IPOScoreCard } from "@/components/ipo/research/IPOScoreCard";
 import { IPOStrengthsRisks } from "@/components/ipo/research/IPOStrengthsRisks";
 import { IPOPromotersStructure } from "@/components/ipo/research/IPOPromotersStructure";
@@ -31,6 +32,7 @@ import {
   TrendingUp,
   Coins,
   FileText,
+  Scale,
 } from "lucide-react";
 
 interface PageProps {
@@ -91,6 +93,10 @@ export default async function IPODetailPage({ params }: PageProps) {
     score,
     documents,
     news,
+    allotmentFacts,
+    allotmentEstimates,
+    registrarPortalStatus,
+    allotmentEvents,
   } = bundle;
 
   const milestones = buildIPOTimeline(ipo);
@@ -304,6 +310,21 @@ export default async function IPODetailPage({ params }: PageProps) {
             <h2 className="text-base font-bold text-[var(--text-primary)]">Live Subscription Demand & Quota Breakdown</h2>
           </div>
           <IPOSubscriptionCard ipo={ipo} latestSubscription={latestSubscription} snapshots={subscriptionSnapshots} />
+        </section>
+
+        {/* Section 9.5: Allotment & Registrar Intelligence */}
+        <section id="allotment" className="space-y-4">
+          <div className="flex items-center gap-2 pb-2 border-b border-[var(--border-subtle)]">
+            <Scale className="w-4 h-4 text-[var(--brand-primary)]" />
+            <h2 className="text-base font-bold text-[var(--text-primary)]">Allotment Probability & Registrar Status</h2>
+          </div>
+          <IPOAllotmentCard
+            ipo={ipo}
+            facts={allotmentFacts || null}
+            estimates={allotmentEstimates || null}
+            portalStatus={registrarPortalStatus || null}
+            events={allotmentEvents || []}
+          />
         </section>
 
         {/* Section 10: Quantitative IPO Score */}

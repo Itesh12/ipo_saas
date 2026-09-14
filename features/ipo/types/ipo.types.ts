@@ -13,9 +13,19 @@ export type IPOStrengthRow = Database["public"]["Tables"]["ipo_strengths"]["Row"
 export type IPORiskRow = Database["public"]["Tables"]["ipo_risks"]["Row"];
 export type IPOGMPEntryRow = Database["public"]["Tables"]["ipo_gmp_entries"]["Row"];
 export type IPOSubscriptionSnapshotRow = Database["public"]["Tables"]["ipo_subscription_snapshots"]["Row"];
+export type IPOSubscriptionObservationRow = Database["public"]["Tables"]["ipo_subscription_observations"]["Row"];
+export type IPOAllotmentEventRow = Database["public"]["Tables"]["ipo_allotment_events"]["Row"];
+export type IPOAllotmentFactRow = Database["public"]["Tables"]["ipo_allotment_facts"]["Row"];
+export type IPORegistrarPortalStatusRow = Database["public"]["Tables"]["ipo_registrar_portal_status"]["Row"];
+export type IPOAllotmentEstimateRow = Database["public"]["Tables"]["ipo_allotment_estimates"]["Row"];
 export type IPOScoreRow = Database["public"]["Tables"]["ipo_scores"]["Row"];
 export type IPODocumentRow = Database["public"]["Tables"]["ipo_documents"]["Row"];
 export type IPONewsRow = Database["public"]["Tables"]["ipo_news"]["Row"];
+
+export type SubscriptionFeedScope = Database["public"]["Enums"]["subscription_feed_scope"];
+export type SubscriptionAnomalyStatus = Database["public"]["Enums"]["subscription_anomaly_status"];
+export type RegistrarQueryState = Database["public"]["Enums"]["registrar_query_state"];
+export type IPOAllotmentLifecycleState = Database["public"]["Enums"]["ipo_allotment_lifecycle_state"];
 
 export type IPOCategory = Database["public"]["Enums"]["ipo_category"];
 export type IPOIssueType = Database["public"]["Enums"]["ipo_issue_type"];
@@ -79,6 +89,10 @@ export interface IPOResearchBundle {
   score: IPOScoreRow | null;
   documents: IPODocumentRow[];
   news: IPONewsRow[];
+  allotmentFacts?: IPOAllotmentFactRow | null;
+  allotmentEstimates?: IPOAllotmentEstimateRow | null;
+  registrarPortalStatus?: IPORegistrarPortalStatusRow | null;
+  allotmentEvents?: IPOAllotmentEventRow[];
 }
 
 export interface IPOScoreBreakdown {

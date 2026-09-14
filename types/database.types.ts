@@ -50,6 +50,34 @@ export type IPODocType =
   | "abridged_prospectus"
   | "other";
 
+export type SubscriptionFeedScope = "exchange_specific" | "consolidated";
+
+export type SubscriptionAnomalyStatus =
+  | "valid"
+  | "valid_with_adjustment"
+  | "anomalous"
+  | "source_corrected"
+  | "invalid";
+
+export type RegistrarQueryState =
+  | "not_discovered"
+  | "announced"
+  | "portal_reachable"
+  | "query_endpoint_detected"
+  | "query_active"
+  | "temporarily_unavailable"
+  | "blocked"
+  | "unknown";
+
+export type IPOAllotmentLifecycleState =
+  | "bidding_closed"
+  | "awaiting_basis"
+  | "basis_finalized"
+  | "allotment_out"
+  | "refunds_initiated"
+  | "demat_credited"
+  | "listed";
+
 export type IPORiskSeverity = "low" | "medium" | "high";
 
 export type IPOSentiment = "positive" | "neutral" | "negative" | "cautious";
@@ -243,6 +271,7 @@ export interface Database {
           updated_at: string;
           provenance?: Json | null;
           is_listing_confirmed?: boolean;
+          designated_exchange?: string | null;
         };
         Insert: {
           id?: string;
@@ -284,6 +313,7 @@ export interface Database {
           updated_at?: string;
           provenance?: Json | null;
           is_listing_confirmed?: boolean;
+          designated_exchange?: string | null;
         };
         Update: {
           id?: string;
@@ -325,6 +355,7 @@ export interface Database {
           updated_at?: string;
           provenance?: Json | null;
           is_listing_confirmed?: boolean;
+          designated_exchange?: string | null;
         };
       };
       ipo_events: {
@@ -767,14 +798,28 @@ export interface Database {
           nii_x: number | null;
           nii_bighni_x: number | null;
           nii_smallhni_x: number | null;
+          b_hni_x?: number | null;
+          s_hni_x?: number | null;
           retail_x: number | null;
           employee_x: number | null;
+          shareholder_x?: number | null;
           overall_x: number;
           total_bids_count: number | null;
           total_shares_offered: number | null;
           source: string;
           as_of: string | null;
           created_at: string;
+          latest_observation_id?: string | null;
+          source_observation_id?: string | null;
+          source_observation_hash?: string | null;
+          authoritative_exchange?: string | null;
+          feed_scope?: SubscriptionFeedScope;
+          source_composition?: string[];
+          category_details?: Json;
+          is_final_for_day?: boolean;
+          session_close_source?: string | null;
+          validation_status?: IPOVerificationStatus;
+          updated_at?: string;
         };
         Insert: {
           id?: string;
@@ -786,14 +831,28 @@ export interface Database {
           nii_x?: number | null;
           nii_bighni_x?: number | null;
           nii_smallhni_x?: number | null;
+          b_hni_x?: number | null;
+          s_hni_x?: number | null;
           retail_x?: number | null;
           employee_x?: number | null;
+          shareholder_x?: number | null;
           overall_x: number;
           total_bids_count?: number | null;
           total_shares_offered?: number | null;
           source?: string;
           as_of?: string | null;
           created_at?: string;
+          latest_observation_id?: string | null;
+          source_observation_id?: string | null;
+          source_observation_hash?: string | null;
+          authoritative_exchange?: string | null;
+          feed_scope?: SubscriptionFeedScope;
+          source_composition?: string[];
+          category_details?: Json;
+          is_final_for_day?: boolean;
+          session_close_source?: string | null;
+          validation_status?: IPOVerificationStatus;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -805,14 +864,284 @@ export interface Database {
           nii_x?: number | null;
           nii_bighni_x?: number | null;
           nii_smallhni_x?: number | null;
+          b_hni_x?: number | null;
+          s_hni_x?: number | null;
           retail_x?: number | null;
           employee_x?: number | null;
+          shareholder_x?: number | null;
           overall_x?: number;
           total_bids_count?: number | null;
           total_shares_offered?: number | null;
           source?: string;
           as_of?: string | null;
           created_at?: string;
+          latest_observation_id?: string | null;
+          source_observation_id?: string | null;
+          source_observation_hash?: string | null;
+          authoritative_exchange?: string | null;
+          feed_scope?: SubscriptionFeedScope;
+          source_composition?: string[];
+          category_details?: Json;
+          is_final_for_day?: boolean;
+          session_close_source?: string | null;
+          validation_status?: IPOVerificationStatus;
+          updated_at?: string;
+        };
+      };
+      ipo_subscription_observations: {
+        Row: {
+          id: string;
+          ipo_id: string;
+          source_observation_id: string | null;
+          source_observation_uid: string;
+          source_observation_hash: string;
+          exchange: string;
+          feed_scope: SubscriptionFeedScope;
+          source_composition: string[];
+          day_number: number;
+          snapshot_time: string;
+          reported_overall_x: number;
+          computed_overall_x: number | null;
+          calculation_basis: string;
+          tolerance_pct: number;
+          anomaly_status: SubscriptionAnomalyStatus;
+          anomaly_reason: string | null;
+          source_qib_definition: string;
+          definition_verified: boolean;
+          anchor_adjustment_applied: boolean;
+          qib_x: number | null;
+          b_hni_x: number | null;
+          s_hni_x: number | null;
+          retail_x: number | null;
+          employee_x: number | null;
+          shareholder_x: number | null;
+          category_details: Json;
+          validation_status: IPOVerificationStatus;
+          raw_payload_hash: string;
+          is_corrected: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id: string;
+          source_observation_id?: string | null;
+          source_observation_uid: string;
+          source_observation_hash: string;
+          exchange: string;
+          feed_scope?: SubscriptionFeedScope;
+          source_composition?: string[];
+          day_number: number;
+          snapshot_time: string;
+          reported_overall_x: number;
+          computed_overall_x?: number | null;
+          calculation_basis: string;
+          tolerance_pct?: number;
+          anomaly_status?: SubscriptionAnomalyStatus;
+          anomaly_reason?: string | null;
+          source_qib_definition?: string;
+          definition_verified?: boolean;
+          anchor_adjustment_applied?: boolean;
+          qib_x?: number | null;
+          b_hni_x?: number | null;
+          s_hni_x?: number | null;
+          retail_x?: number | null;
+          employee_x?: number | null;
+          shareholder_x?: number | null;
+          category_details?: Json;
+          validation_status?: IPOVerificationStatus;
+          raw_payload_hash: string;
+          is_corrected?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string;
+          source_observation_id?: string | null;
+          source_observation_uid?: string;
+          source_observation_hash?: string;
+          exchange?: string;
+          feed_scope?: SubscriptionFeedScope;
+          source_composition?: string[];
+          day_number?: number;
+          snapshot_time?: string;
+          reported_overall_x?: number;
+          computed_overall_x?: number | null;
+          calculation_basis?: string;
+          tolerance_pct?: number;
+          anomaly_status?: SubscriptionAnomalyStatus;
+          anomaly_reason?: string | null;
+          source_qib_definition?: string;
+          definition_verified?: boolean;
+          anchor_adjustment_applied?: boolean;
+          qib_x?: number | null;
+          b_hni_x?: number | null;
+          s_hni_x?: number | null;
+          retail_x?: number | null;
+          employee_x?: number | null;
+          shareholder_x?: number | null;
+          category_details?: Json;
+          validation_status?: IPOVerificationStatus;
+          raw_payload_hash?: string;
+          is_corrected?: boolean;
+          created_at?: string;
+        };
+      };
+      ipo_allotment_events: {
+        Row: {
+          id: string;
+          ipo_id: string;
+          lifecycle_state: IPOAllotmentLifecycleState;
+          source_observation_id: string | null;
+          event_time: string;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id: string;
+          lifecycle_state: IPOAllotmentLifecycleState;
+          source_observation_id?: string | null;
+          event_time?: string;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string;
+          lifecycle_state?: IPOAllotmentLifecycleState;
+          source_observation_id?: string | null;
+          event_time?: string;
+          notes?: string | null;
+          created_at?: string;
+        };
+      };
+      ipo_allotment_facts: {
+        Row: {
+          id: string;
+          ipo_id: string;
+          basis_document_id: string;
+          official_total_valid_applications: number;
+          official_total_rejected_applications: number;
+          official_retail_valid_applications: number;
+          official_retail_successful_applicants: number;
+          official_retail_lottery_ratio: number;
+          official_shni_valid_applications: number | null;
+          official_shni_successful_applicants: number | null;
+          official_shni_lottery_ratio: number | null;
+          official_bhni_proportionate_factor: number | null;
+          proposed_allotment_date: string | null;
+          proposed_listing_date: string | null;
+          verified_by_observation_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id: string;
+          basis_document_id: string;
+          official_total_valid_applications: number;
+          official_total_rejected_applications: number;
+          official_retail_valid_applications: number;
+          official_retail_successful_applicants: number;
+          official_retail_lottery_ratio: number;
+          official_shni_valid_applications?: number | null;
+          official_shni_successful_applicants?: number | null;
+          official_shni_lottery_ratio?: number | null;
+          official_bhni_proportionate_factor?: number | null;
+          proposed_allotment_date?: string | null;
+          proposed_listing_date?: string | null;
+          verified_by_observation_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string;
+          basis_document_id?: string;
+          official_total_valid_applications?: number;
+          official_total_rejected_applications?: number;
+          official_retail_valid_applications?: number;
+          official_retail_successful_applicants?: number;
+          official_retail_lottery_ratio?: number;
+          official_shni_valid_applications?: number | null;
+          official_shni_successful_applicants?: number | null;
+          official_shni_lottery_ratio?: number | null;
+          official_bhni_proportionate_factor?: number | null;
+          proposed_allotment_date?: string | null;
+          proposed_listing_date?: string | null;
+          verified_by_observation_id?: string | null;
+          created_at?: string;
+        };
+      };
+      ipo_registrar_portal_status: {
+        Row: {
+          id: string;
+          ipo_id: string;
+          registrar_name: string;
+          portal_url: string;
+          query_state: RegistrarQueryState;
+          last_probed_at: string;
+          probe_http_status: number | null;
+          company_detected_in_dropdown: boolean;
+          error_details: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id: string;
+          registrar_name: string;
+          portal_url: string;
+          query_state?: RegistrarQueryState;
+          last_probed_at?: string;
+          probe_http_status?: number | null;
+          company_detected_in_dropdown?: boolean;
+          error_details?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string;
+          registrar_name?: string;
+          portal_url?: string;
+          query_state?: RegistrarQueryState;
+          last_probed_at?: string;
+          probe_http_status?: number | null;
+          company_detected_in_dropdown?: boolean;
+          error_details?: string | null;
+          updated_at?: string;
+        };
+      };
+      ipo_allotment_estimates: {
+        Row: {
+          id: string;
+          ipo_id: string;
+          final_subscription_snapshot_id: string | null;
+          estimated_retail_subscription_x: number;
+          estimated_retail_lottery_ratio: number;
+          estimated_retail_allotment_probability_pct: number;
+          estimation_disclaimer: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id: string;
+          final_subscription_snapshot_id?: string | null;
+          estimated_retail_subscription_x: number;
+          estimated_retail_lottery_ratio: number;
+          estimated_retail_allotment_probability_pct: number;
+          estimation_disclaimer?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string;
+          final_subscription_snapshot_id?: string | null;
+          estimated_retail_subscription_x?: number;
+          estimated_retail_lottery_ratio?: number;
+          estimated_retail_allotment_probability_pct?: number;
+          estimation_disclaimer?: string;
+          created_at?: string;
+          updated_at?: string;
         };
       };
       ipo_scores: {
@@ -1778,6 +2107,10 @@ export interface Database {
       funding_owner_type: FundingOwnerType;
       ownership_category: OwnershipCategory;
       finance_backfill_state: FinanceBackfillState;
+      subscription_feed_scope: SubscriptionFeedScope;
+      subscription_anomaly_status: SubscriptionAnomalyStatus;
+      registrar_query_state: RegistrarQueryState;
+      ipo_allotment_lifecycle_state: IPOAllotmentLifecycleState;
     };
   };
 }
