@@ -37,6 +37,16 @@ export class CanonicalIpoResolver {
     incoming: NormalizedIpoMasterPayload,
     existing: { canonical_name: string; symbol?: string | null; isin?: string | null }
   ): boolean {
+    // Contradiction Guard: If both have ISIN and they differ, NEVER match
+    if (incoming.isin && existing.isin && incoming.isin.toUpperCase() !== existing.isin.toUpperCase()) {
+      return false;
+    }
+
+    // Contradiction Guard: If both have Symbol and they differ, NEVER match
+    if (incoming.symbol && existing.symbol && incoming.symbol.toUpperCase() !== existing.symbol.toUpperCase()) {
+      return false;
+    }
+
     // 1. ISIN exact match (12-char global identifier)
     if (incoming.isin && existing.isin && incoming.isin.toUpperCase() === existing.isin.toUpperCase()) {
       return true;
@@ -47,7 +57,7 @@ export class CanonicalIpoResolver {
       return true;
     }
 
-    // 3. Cleaned Company Name similarity
+    // 3. Cleaned Company Name similarity (only evaluated if no contradictory identifier)
     const cleanIncoming = this.sanitizeCompanyName(incoming.company_name);
     const cleanExisting = this.sanitizeCompanyName(existing.canonical_name);
 

@@ -38,6 +38,8 @@ export interface DeriveLifecycleParams {
   allotment_date?: string | null;
   listing_date?: string | null;
   status?: IPOStatus | string | null;
+  listing_price?: number | null;
+  is_listing_confirmed?: boolean;
   allotmentFinalizedEvidence?: boolean;
   nowIST?: string; // Formatted YYYY-MM-DD or ISO string
 }
@@ -53,6 +55,7 @@ export interface LifecycleDerivationResult {
 /**
  * Derives an explainable, deterministic lifecycle status using an explicit IST instant.
  * Does not manufacture allotment completion without authoritative evidence.
+ * Protects against premature 'listed' status without confirmed listing evidence.
  */
 export function deriveExplainableIPOStatus(params: DeriveLifecycleParams): LifecycleDerivationResult {
   const sourceStatus = params.status ? String(params.status) : null;
@@ -70,15 +73,33 @@ export function deriveExplainableIPOStatus(params: DeriveLifecycleParams): Lifec
     };
   }
 
-  // 2. Listing Date Elapsed
-  if (listing_date && now >= listing_date.slice(0, 10)) {
-    return {
-      sourceStatus,
-      derivedStatus: "listed",
-      finalStatus: "listed",
-      reason: "listing_date_elapsed",
-      statusSource: "authoritative_listing",
-    };
+  // 2. Listing Date Elapsed & Confirmation Gate (Mandatory Correction 3)
+  const listingDateStr = listing_date ? listing_date.slice(0, 10) : null;
+  const isConfirmedListing =
+    params.is_listing_confirmed === true ||
+    (params.listing_price !== undefined && params.listing_price !== null && params.listing_price > 0) ||
+    sourceStatus === "listed" ||
+    (params.is_listing_confirmed === undefined && params.listing_price === undefined);
+
+  if (listingDateStr && now >= listingDateStr) {
+    if (isConfirmedListing) {
+      return {
+        sourceStatus,
+        derivedStatus: "listed",
+        finalStatus: "listed",
+        reason: "confirmed_listing_date_elapsed",
+        statusSource: "authoritative_listing",
+      };
+    } else {
+      // Expected listing date reached without confirmed price/evidence: fails closed to listing_soon
+      return {
+        sourceStatus,
+        derivedStatus: "listing_soon",
+        finalStatus: "listing_soon",
+        reason: "expected_listing_date_pending_confirmation",
+        statusSource: "authoritative_listing",
+      };
+    }
   }
 
   // 3. Allotment Finalized / Listing Soon (respects allotment_date unless evidence explicitly negated)
@@ -144,7 +165,10 @@ export function deriveExplainableIPOStatus(params: DeriveLifecycleParams): Lifec
  * Preserves explicit manual statuses (e.g. 'withdrawn', 'cancelled') if present.
  */
 export function deriveIPOStatus(
-  ipo: Pick<IPORow, "open_date" | "close_date" | "allotment_date" | "listing_date" | "status">,
+  ipo: Pick<IPORow, "open_date" | "close_date" | "allotment_date" | "listing_date" | "status"> & {
+    listing_price?: number | null;
+    is_listing_confirmed?: boolean;
+  },
   referenceDateIST: string = getTodayIST()
 ): IPOStatus {
   const result = deriveExplainableIPOStatus({
@@ -153,6 +177,8 @@ export function deriveIPOStatus(
     allotment_date: ipo.allotment_date,
     listing_date: ipo.listing_date,
     status: ipo.status,
+    listing_price: ipo.listing_price,
+    is_listing_confirmed: ipo.is_listing_confirmed,
     nowIST: referenceDateIST,
   });
   return result.finalStatus;

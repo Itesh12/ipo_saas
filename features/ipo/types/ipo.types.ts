@@ -31,7 +31,7 @@ export type IPOAuditStatus = Database["public"]["Enums"]["ipo_audit_status"];
 
 export interface IPOFilterParams {
   category?: IPOCategory | "all";
-  status?: IPOStatus | "all" | "current" | "upcoming" | "past";
+  status?: IPOStatus | "all" | "current" | "upcoming" | "past" | "active_universe";
   searchQuery?: string;
   sortBy?: "open_date" | "close_date" | "listing_date" | "issue_size" | "company_name";
   sortOrder?: "asc" | "desc";

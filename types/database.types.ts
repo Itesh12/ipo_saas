@@ -236,6 +236,8 @@ export interface Database {
           published_at: string | null;
           created_at: string;
           updated_at: string;
+          provenance?: Json | null;
+          is_listing_confirmed?: boolean;
         };
         Insert: {
           id?: string;
@@ -275,6 +277,8 @@ export interface Database {
           published_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          provenance?: Json | null;
+          is_listing_confirmed?: boolean;
         };
         Update: {
           id?: string;
@@ -314,6 +318,8 @@ export interface Database {
           published_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          provenance?: Json | null;
+          is_listing_confirmed?: boolean;
         };
       };
       ipo_events: {

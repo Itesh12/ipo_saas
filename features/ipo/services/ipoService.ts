@@ -153,6 +153,8 @@ export async function getPublishedIPOs(filters: IPOFilterParams = {}): Promise<{
         query = query.in("status", ["announced", "upcoming"]);
       } else if (filters.status === "past") {
         query = query.in("status", ["closed", "allotment_pending", "listing_soon", "listed"]);
+      } else if (filters.status === "active_universe") {
+        query = query.in("status", ["upcoming", "open", "closed", "allotment_pending", "listing_soon"]);
       } else {
         query = query.eq("status", filters.status);
       }

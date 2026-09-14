@@ -9,10 +9,9 @@
 
 import { requireRole } from '@/lib/security/auth-guards';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { ipoIngestionService, IpoIngestionService } from '../services/ipoIngestionService';
+import { ipoIngestionService } from '../services/ipoIngestionService';
 import { SebiPublicIssuesExtractor } from '../adapters/sebiExtractor';
 import { AuditLoggingService } from '@/features/admin/services/auditLoggingService';
-import { IngestionObservationRecord } from '../ipo-master/ipoMasterTypes';
 
 export interface IngestionTriggerParams {
   source: 'sebi' | 'nse' | 'bse' | 'upstox' | 'all';
@@ -85,61 +84,81 @@ export async function getPendingInboxItems() {
   return data || [];
 }
 
-export async function promoteInboxItemToDraft(inboxId: string) {
+/**
+ * Retrieves the full canonical review queue with 7-field gatekeeper evaluation.
+ */
+export async function getCanonicalReviewQueueAction() {
+  await requireRole('admin');
+  const { ipoCanonicalPromotionService } = await import('../services/ipoCanonicalPromotionService');
+  return await ipoCanonicalPromotionService.getCanonicalReviewQueue();
+}
+
+/**
+ * Promotes a candidate to Canonical Master as a DRAFT.
+ * Does NOT publish to the public catalog.
+ */
+export async function promoteCandidateToDraftAction(inboxId: string) {
   const adminUser = await requireRole('admin');
-  const ipoId = await ipoIngestionService.promoteToDraft(inboxId, adminUser.id);
+  const { ipoCanonicalPromotionService } = await import('../services/ipoCanonicalPromotionService');
+  const result = await ipoCanonicalPromotionService.promoteCandidateToDraft(inboxId, adminUser.id);
 
   await AuditLoggingService.recordAudit({
     actorId: adminUser.id,
-    action: 'PROMOTE_INBOX_TO_DRAFT',
+    action: 'PROMOTE_CANDIDATE_TO_DRAFT',
     resourceType: 'INGESTION_INBOX',
     resourceId: inboxId,
-    newValues: { promotedIpoId: ipoId },
+    newValues: { ipoId: result.ipoId, slug: result.slug },
   });
 
-  return { success: true, ipoId };
+  return result;
+}
+
+/**
+ * Explicit Admin Approval: Promotes and PUBLISHES an eligible candidate to public catalog.
+ * Strict Gate: Fails closed if 7-field gate is not satisfied.
+ */
+export async function approveAndPublishCandidateAction(inboxId: string) {
+  const adminUser = await requireRole('admin');
+  const { ipoCanonicalPromotionService } = await import('../services/ipoCanonicalPromotionService');
+  const result = await ipoCanonicalPromotionService.approveAndPublishCandidate(inboxId, adminUser.id);
+
+  await AuditLoggingService.recordAudit({
+    actorId: adminUser.id,
+    action: 'APPROVE_AND_PUBLISH_CANDIDATE',
+    resourceType: 'INGESTION_INBOX',
+    resourceId: inboxId,
+    newValues: { ipoId: result.ipoId, slug: result.slug, status: result.businessStatus },
+  });
+
+  return result;
+}
+
+/**
+ * Explicit Admin Rejection with documented reason.
+ */
+export async function rejectCandidateAction(inboxId: string, reason: string) {
+  const adminUser = await requireRole('admin');
+  const { ipoCanonicalPromotionService } = await import('../services/ipoCanonicalPromotionService');
+  await ipoCanonicalPromotionService.rejectCandidate(inboxId, adminUser.id, reason);
+
+  await AuditLoggingService.recordAudit({
+    actorId: adminUser.id,
+    action: 'REJECT_CANDIDATE',
+    resourceType: 'INGESTION_INBOX',
+    resourceId: inboxId,
+    newValues: { reason },
+  });
+
+  return { success: true };
+}
+
+// Backwards-compatible aliases
+export async function promoteInboxItemToDraft(inboxId: string) {
+  const res = await promoteCandidateToDraftAction(inboxId);
+  return { success: true, ipoId: res.ipoId };
 }
 
 export async function directPublishInboxItem(inboxId: string) {
-  const adminUser = await requireRole('admin');
-  const admin = createAdminClient();
-
-  const { data: inbox } = await admin
-    .from('ipo_ingestion_inbox')
-    .select('*, latest_observation:ipo_ingestion_observations!fk_inbox_latest_observation(*)')
-    .eq('id', inboxId)
-    .single();
-
-  if (!inbox) throw new Error('Inbox item not found');
-  const obs = inbox.latest_observation as unknown as IngestionObservationRecord;
-  if (!obs) throw new Error('No observation attached to inbox item');
-
-  // Verify strict 6-point criteria
-  const validation = IpoIngestionService.validateDirectPublish(inbox, obs.normalized_payload);
-  if (!validation.canPublish) {
-    throw new Error(`Direct publish blocked: ${validation.reasons.join(', ')}`);
-  }
-
-  // Promote to draft first, then set status = 'open' or 'upcoming'
-  const ipoId = await ipoIngestionService.promoteToDraft(inboxId, adminUser.id);
-
-  await admin
-    .from('ipos')
-    .update({ status: obs.normalized_payload.business_status || 'upcoming' })
-    .eq('id', ipoId);
-
-  await admin
-    .from('ipo_ingestion_inbox')
-    .update({ review_status: 'promoted_to_published' })
-    .eq('id', inboxId);
-
-  await AuditLoggingService.recordAudit({
-    actorId: adminUser.id,
-    action: 'DIRECT_PUBLISH_INBOX_ITEM',
-    resourceType: 'INGESTION_INBOX',
-    resourceId: inboxId,
-    newValues: { ipoId },
-  });
-
-  return { success: true, ipoId };
+  const res = await approveAndPublishCandidateAction(inboxId);
+  return { success: true, ipoId: res.ipoId };
 }

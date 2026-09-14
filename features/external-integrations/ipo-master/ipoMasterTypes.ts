@@ -31,7 +31,9 @@ export type IngestionReviewStatus =
   | 'identity_resolved'   // Identity established across official sources, awaiting review
   | 'pending'             // Queued for editorial review
   | 'pending_review'      // Complete canonical record ready for sign-off
+  | 'ready_for_review'
   | 'conflict_detected'   // Discrepancy between Tier-1 sources, requires admin resolution
+  | 'conflicted'
   | 'promoted_to_draft'   // Approved by admin, draft created in ipos table
   | 'promoted_to_published'// Formally published to public directory
   | 'rejected'            // Excluded (e.g. debt, rights, withdrawn)
@@ -99,7 +101,11 @@ export interface NormalizedIpoMasterPayload {
   close_date?: string | null;     // ISO YYYY-MM-DD
   allotment_date?: string | null; // ISO YYYY-MM-DD
   listing_date?: string | null;   // ISO YYYY-MM-DD
-  exchange?: 'NSE' | 'BSE' | 'BOTH' | null;
+  bidding_start_time?: string | null;
+  bidding_end_time?: string | null;
+  listing_price?: number | null;
+  is_listing_confirmed?: boolean;
+  exchange?: 'NSE' | 'BSE' | 'BOTH' | string | null;
   drhp_url?: string | null;
   rhp_url?: string | null;
   prospectus_url?: string | null;
