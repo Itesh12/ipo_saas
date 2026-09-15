@@ -248,7 +248,12 @@ export class NseSourceClient {
         series: typeof item.series === 'string' ? item.series : (typeof item.issueType === 'string' ? item.issueType : undefined),
         issueStartDate: typeof item.issueStartDate === 'string' ? item.issueStartDate : (typeof item.startDate === 'string' ? item.startDate : undefined),
         issueEndDate: typeof item.issueEndDate === 'string' ? item.issueEndDate : (typeof item.endDate === 'string' ? item.endDate : undefined),
-        priceBand: typeof item.priceBand === 'string' ? item.priceBand : (typeof item.price === 'string' ? item.price : undefined),
+        priceBand:
+          typeof item.priceBand === 'string'
+            ? item.priceBand
+            : (typeof item.issuePrice === 'string'
+              ? item.issuePrice
+              : (typeof item.price === 'string' ? item.price : undefined)),
         lotSize: typeof item.lotSize === 'number' || typeof item.lotSize === 'string' ? item.lotSize : undefined,
         issueSize: typeof item.issueSize === 'number' || typeof item.issueSize === 'string' ? item.issueSize : undefined,
         documentUrl: typeof item.documentUrl === 'string' ? item.documentUrl : undefined,

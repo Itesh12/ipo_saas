@@ -59,8 +59,17 @@ export class IpoIngestionService {
     const isDuplicate = rpcResult.is_duplicate === true;
     const observationId = rpcResult.observation_id;
 
-    // 4. If observation was a duplicate, re-evaluate conflicts against current resolver
+    // 4. If observation was a duplicate, re-apply latest normalization and re-evaluate conflicts
     if (isDuplicate) {
+      if (observationId) {
+        await admin
+          .from('ipo_ingestion_observations')
+          .update({
+            normalized_payload: extraction.normalized_payload,
+            provenance: extraction.provenance,
+          })
+          .eq('id', observationId);
+      }
       const conflictOutcome = await this.evaluateInboxConflicts(inboxId, admin);
       return {
         inboxId,

@@ -15,7 +15,60 @@ export type SourceAuthorityTier =
   | 'licensed_feed'       // Tier 3: Upstox, Commercial Aggregators
   | 'unofficial_observed';// Tier 4: GMP Trackers (Deferred)
 
-export type IngestionSource = 'sebi' | 'nse' | 'bse' | 'upstox';
+export type IngestionSource = 'sebi' | 'nse' | 'bse' | 'upstox' | 'nse_archive' | 'bse_archive' | 'sebi_archive';
+
+export type IPODataQuality = 'discovered' | 'partial' | 'verified' | 'complete' | 'conflicted';
+
+export type IPOInstrumentType =
+  | 'IPO'
+  | 'SME_IPO'
+  | 'FPO'
+  | 'RIGHTS'
+  | 'OFFER_FOR_SALE'
+  | 'DEBT'
+  | 'REIT'
+  | 'INVIT'
+  | 'BUYBACK'
+  | 'OTHER';
+
+export type GlobalCoverageState = 'COMPLETE' | 'PARTIAL' | 'DEGRADED' | 'UNKNOWN';
+
+export interface FieldTruthEntry {
+  field: string;
+  sebi_value?: unknown;
+  nse_value?: unknown;
+  bse_value?: unknown;
+  archive_value?: unknown;
+  selected_value: unknown;
+  selected_source: string;
+  confidence: 'high' | 'medium' | 'pending';
+  rule_applied: string;
+}
+
+export type FieldTruthTable = Record<string, FieldTruthEntry>;
+
+export interface SourceReconciliationStats {
+  source: string;
+  discovered_records: number;
+  resolved_candidates: number;
+  rejected_records: number;
+  unexplained_records: number;
+  status: 'healthy' | 'degraded' | 'unreachable';
+}
+
+export interface GlobalReconciliationSummary {
+  sources: Record<string, SourceReconciliationStats>;
+  total_discovered_observations: number;
+  total_resolved_observations: number;
+  total_rejected_observations: number;
+  total_unexplained_observations: number;
+  unique_issue_identities: number;
+  canonical_master_ipos: number;
+  duplicate_issue_identities: number;
+  runtime_fixture_records: number;
+  coverage_state: GlobalCoverageState;
+  coverage_state_reason: string;
+}
 
 export type IngestionDocumentType =
   | 'IPO_MASTER'
@@ -112,6 +165,11 @@ export interface NormalizedIpoMasterPayload {
   registrar?: string | null;
   lead_managers?: string[];
   business_status?: IPOStatus | null;
+  issue_identity?: string | null;
+  instrument_type?: IPOInstrumentType | null;
+  data_quality?: IPODataQuality | null;
+  offering_year?: number | null;
+  amendment_urls?: string[];
 }
 
 export type IpoProvenanceMap = {

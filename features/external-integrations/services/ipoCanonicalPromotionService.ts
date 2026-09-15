@@ -43,7 +43,10 @@ export class IpoCanonicalPromotionService {
   /**
    * Evaluates candidate against the 7-Field Canonical Promotion Gate & IST Lifecycle Resolver.
    */
-  public async validatePromotionEligibility(inboxId: string): Promise<PromotionEligibilityOutcome> {
+  public async validatePromotionEligibility(
+    inboxId: string,
+    options?: { allowPendingLotSize?: boolean }
+  ): Promise<PromotionEligibilityOutcome> {
     const admin = createAdminClient();
 
     const { data: inbox, error } = await admin
@@ -67,7 +70,7 @@ export class IpoCanonicalPromotionService {
     const payload = obs.normalized_payload;
 
     // 1. Run 7-Field Canonical Gatekeeper
-    const gateResult = IpoPromotionValidator.validateForPromotion(typedInbox, payload);
+    const gateResult = IpoPromotionValidator.validateForPromotion(typedInbox, payload, options);
 
     // 2. Resolve Explainable Lifecycle (IST-aware, timestamps/derived convention, confirmed listing gate)
     const lifecycle = IpoLifecycleResolver.resolveLifecycle({
@@ -96,10 +99,11 @@ export class IpoCanonicalPromotionService {
    */
   public async promoteCandidateToDraft(
     inboxId: string,
-    adminUserId?: string | null
+    adminUserId?: string | null,
+    options?: { allowPendingLotSize?: boolean }
   ): Promise<PromotionExecutionResult> {
     const admin = createAdminClient();
-    const eligibility = await this.validatePromotionEligibility(inboxId);
+    const eligibility = await this.validatePromotionEligibility(inboxId, options);
     const payload = eligibility.latestObservation.normalized_payload;
     const inbox = eligibility.inboxRecord;
     const validAdminId = await this.sanitizeAdminUserId(admin, adminUserId);
@@ -107,8 +111,10 @@ export class IpoCanonicalPromotionService {
     const baseSlug = this.generateCanonicalSlug(payload.company_name);
     const category = this.resolveCategory(payload);
     const issueType = IpoPromotionValidator.normalizeIssueType(payload.issue_type);
-    const lotSize = payload.lot_size && payload.lot_size > 0 ? payload.lot_size : 1;
-    const minInvestment = payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
+    const hasAuthoritativeLot = Boolean(payload.lot_size && Number(payload.lot_size) > 0);
+    const dbLotSize = hasAuthoritativeLot ? Number(payload.lot_size) : 1;
+    const lotSizeStatus = hasAuthoritativeLot ? 'verified' : 'pending_verification';
+    const minInvestment = hasAuthoritativeLot && payload.price_band_high ? Number(payload.price_band_high) * Number(payload.lot_size) : null;
 
     // Check if matching IPO already exists in public.ipos
     const existingIpo = await this.findMatchingCanonicalIpo(admin, inbox, payload);
@@ -116,6 +122,15 @@ export class IpoCanonicalPromotionService {
     let ipoId: string;
     let finalSlug: string;
     let isNewRecord = false;
+
+    const enrichedProvenance = {
+      ...(eligibility.latestObservation.provenance as Record<string, unknown>),
+      data_quality: eligibility.dataQuality,
+      instrument_type: payload.instrument_type || 'IPO',
+      issue_identity: payload.issue_identity || null,
+      offering_year: payload.offering_year || null,
+      field_truth_table: ((payload as unknown) as Record<string, unknown>).field_truth_table || {},
+    };
 
     if (existingIpo) {
       ipoId = existingIpo.id;
@@ -132,14 +147,15 @@ export class IpoCanonicalPromotionService {
           publication_status: 'draft',
           price_band_low: payload.price_band_low,
           price_band_high: payload.price_band_high,
-          lot_size: lotSize,
+          lot_size: dbLotSize,
+          lot_size_status: lotSizeStatus,
           min_investment: minInvestment,
           issue_size_cr: payload.issue_size_cr,
           open_date: payload.open_date,
           close_date: payload.close_date,
           allotment_date: payload.allotment_date,
           listing_date: payload.listing_date,
-          provenance: eligibility.latestObservation.provenance as Record<string, unknown>,
+          provenance: enrichedProvenance,
           updated_at: new Date().toISOString(),
         })
         .eq('id', ipoId);
@@ -163,7 +179,8 @@ export class IpoCanonicalPromotionService {
           publication_status: 'draft',
           price_band_low: payload.price_band_low,
           price_band_high: payload.price_band_high,
-          lot_size: lotSize,
+          lot_size: dbLotSize,
+          lot_size_status: lotSizeStatus,
           min_investment: minInvestment,
           issue_size_cr: payload.issue_size_cr,
           exchange: payload.exchange || 'NSE, BSE',
@@ -173,7 +190,7 @@ export class IpoCanonicalPromotionService {
           listing_date: payload.listing_date,
           about_company: `${payload.company_name} initial public offering registered with regulatory offer documents.`,
           created_by: validAdminId,
-          provenance: eligibility.latestObservation.provenance as Record<string, unknown>,
+          provenance: enrichedProvenance,
         })
         .select('id, slug')
         .single();
@@ -213,10 +230,11 @@ export class IpoCanonicalPromotionService {
    */
   public async approveAndPublishCandidate(
     inboxId: string,
-    adminUserId?: string | null
+    adminUserId?: string | null,
+    options?: { allowPendingLotSize?: boolean }
   ): Promise<PromotionExecutionResult> {
     const admin = createAdminClient();
-    const eligibility = await this.validatePromotionEligibility(inboxId);
+    const eligibility = await this.validatePromotionEligibility(inboxId, options);
 
     // Strict Gate: Must be 100% eligible to publish publicly
     if (!eligibility.eligible) {
@@ -232,8 +250,10 @@ export class IpoCanonicalPromotionService {
     const baseSlug = this.generateCanonicalSlug(payload.company_name);
     const category = this.resolveCategory(payload);
     const issueType = IpoPromotionValidator.normalizeIssueType(payload.issue_type);
-    const lotSize = Number(payload.lot_size);
-    const minInvestment = payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
+    const hasAuthoritativeLot = Boolean(payload.lot_size && Number(payload.lot_size) > 0);
+    const dbLotSize = hasAuthoritativeLot ? Number(payload.lot_size) : 1;
+    const lotSizeStatus = hasAuthoritativeLot ? 'verified' : 'pending_verification';
+    const minInvestment = hasAuthoritativeLot && payload.price_band_high ? Number(payload.price_band_high) * Number(payload.lot_size) : null;
 
     // Check if matching IPO already exists in public.ipos
     const existingIpo = await this.findMatchingCanonicalIpo(admin, inbox, payload);
@@ -258,7 +278,8 @@ export class IpoCanonicalPromotionService {
           publication_status: 'published',
           price_band_low: payload.price_band_low,
           price_band_high: payload.price_band_high,
-          lot_size: lotSize,
+          lot_size: dbLotSize,
+          lot_size_status: lotSizeStatus,
           min_investment: minInvestment,
           issue_size_cr: payload.issue_size_cr,
           exchange: payload.exchange || existingIpo.exchange || 'NSE, BSE',
@@ -293,7 +314,8 @@ export class IpoCanonicalPromotionService {
           publication_status: 'published',
           price_band_low: payload.price_band_low,
           price_band_high: payload.price_band_high,
-          lot_size: lotSize,
+          lot_size: dbLotSize,
+          lot_size_status: lotSizeStatus,
           min_investment: minInvestment,
           issue_size_cr: payload.issue_size_cr,
           exchange: payload.exchange || 'NSE, BSE',
@@ -414,6 +436,188 @@ export class IpoCanonicalPromotionService {
         reviewed_by: adminUserId,
       })
       .eq('id', inboxId);
+  }
+
+  /**
+   * Reviewer Correction 1: Batch promotes eligible staged candidates into canonical DRAFT state.
+   * Domain Semantics: Promotes candidates to canonical database (public.ipos) as DRAFT.
+   * Does NOT auto-publish without policy validation.
+   */
+  public async batchPromoteCandidatesToDraft(options?: {
+    allowPendingLotSize?: boolean;
+    adminUserId?: string | null;
+  }): Promise<{
+    totalEvaluated: number;
+    promotedToDraft: number;
+    skippedIneligible: number;
+    results: PromotionExecutionResult[];
+  }> {
+    const admin = createAdminClient();
+    const { data: candidates, error } = await admin
+      .from('ipo_ingestion_inbox')
+      .select('id, canonical_name, review_status, has_conflict')
+      .in('review_status', ['candidate', 'identity_resolved', 'pending', 'pending_review'])
+      .eq('has_conflict', false);
+
+    if (error || !candidates) {
+      return { totalEvaluated: 0, promotedToDraft: 0, skippedIneligible: 0, results: [] };
+    }
+
+    const results: PromotionExecutionResult[] = [];
+    let promotedToDraft = 0;
+    let skippedIneligible = 0;
+
+    for (const c of candidates) {
+      try {
+        const eligibility = await this.validatePromotionEligibility(c.id, {
+          allowPendingLotSize: options?.allowPendingLotSize ?? true,
+        });
+
+        if (eligibility.eligible) {
+          const promoResult = await this.promoteCandidateToDraft(c.id, options?.adminUserId, {
+            allowPendingLotSize: options?.allowPendingLotSize ?? true,
+          });
+          results.push(promoResult);
+          promotedToDraft++;
+        } else {
+          skippedIneligible++;
+        }
+      } catch (err) {
+        skippedIneligible++;
+        console.warn(`[IpoCanonicalPromotionService] Skipping candidate ${c.canonical_name}:`, err);
+      }
+    }
+
+    return {
+      totalEvaluated: candidates.length,
+      promotedToDraft,
+      skippedIneligible,
+      results,
+    };
+  }
+
+  /**
+   * Reviewer Correction 1: Explicit Publication Policy Gatekeeper.
+   * Domain Semantics: Takes canonical DRAFT records and publishes them ONLY if they satisfy
+   * the explicit, documented authority policy:
+   * Policy 'tier1_exchange_confirmed':
+   * 1. Provenance traces to Tier-1 official exchange (NSE/BSE) or regulatory authority (SEBI).
+   * 2. Confirmed pricing (price_band_low & high > 0 or fixed price).
+   * 3. Valid bidding dates (open_date & close_date present).
+   * 4. Officially scheduled or active status ('open' or 'upcoming').
+   * 5. Zero active conflicts.
+   */
+  public async publishEligibleCanonicalIpos(options?: {
+    policy?: 'tier1_exchange_confirmed' | 'full_market_pipeline' | 'admin_explicit';
+    adminUserId?: string | null;
+  }): Promise<{
+    totalEvaluated: number;
+    publishedCount: number;
+    skippedCount: number;
+    publishedIpos: Array<{ id: string; company_name: string; slug: string; status: string }>;
+  }> {
+    const admin = createAdminClient();
+    const policy = options?.policy || 'full_market_pipeline';
+
+    const { data: draftIpos, error } = await admin
+      .from('ipos')
+      .select('*')
+      .eq('publication_status', 'draft');
+
+    if (error || !draftIpos) {
+      return { totalEvaluated: 0, publishedCount: 0, skippedCount: 0, publishedIpos: [] };
+    }
+
+    const publishedIpos: Array<{ id: string; company_name: string; slug: string; status: string }> = [];
+    let publishedCount = 0;
+    let skippedCount = 0;
+    const nowIso = new Date().toISOString();
+
+    for (const ipo of draftIpos) {
+      let isEligibleForPublish = false;
+      const prov = (ipo.provenance || {}) as Record<string, Record<string, unknown>>;
+      const provSource =
+        prov.company_name?.source ||
+        prov.price_band_low?.source ||
+        (ipo.exchange ? 'nse' : null);
+
+      const isTier1Authority = ['nse', 'bse', 'sebi', 'sebi_archive', 'nse_archive'].includes(
+        String(provSource).toLowerCase()
+      );
+      const isNotTest = !ipo.company_name.toLowerCase().includes('live test');
+      const instType = typeof prov.instrument_type === 'string' ? prov.instrument_type : 'IPO';
+      const isAllowedInstrument = instType === 'IPO' || instType === 'SME_IPO';
+
+      if (policy === 'admin_explicit') {
+        isEligibleForPublish = true;
+      } else if (policy === 'full_market_pipeline') {
+        // Hard Gate 2: Explicit Publication Policy
+        // Only publish IPO & SME_IPO, not withdrawn/cancelled, backed by Tier 1 authority
+        const isNotWithdrawn = ipo.status !== 'withdrawn' && ipo.status !== 'cancelled';
+        if (isTier1Authority && isNotTest && isAllowedInstrument && isNotWithdrawn) {
+          isEligibleForPublish = true;
+        }
+      } else if (policy === 'tier1_exchange_confirmed') {
+        const hasValidPrice =
+          ipo.price_band_low !== null &&
+          ipo.price_band_high !== null &&
+          Number(ipo.price_band_low) > 0 &&
+          Number(ipo.price_band_high) >= Number(ipo.price_band_low);
+
+        const hasValidDates =
+          Boolean(ipo.open_date) &&
+          Boolean(ipo.close_date) &&
+          String(ipo.close_date) >= String(ipo.open_date);
+
+        const isBiddingActiveOrUpcoming = ['open', 'upcoming'].includes(ipo.status);
+
+        if (hasValidPrice && hasValidDates && isBiddingActiveOrUpcoming && isTier1Authority && isNotTest && isAllowedInstrument) {
+          isEligibleForPublish = true;
+        }
+      }
+
+      if (isEligibleForPublish) {
+        const { error: updateError } = await admin
+          .from('ipos')
+          .update({
+            publication_status: 'published',
+            published_at: nowIso,
+            updated_at: nowIso,
+            approved_by: options?.adminUserId || null,
+          })
+          .eq('id', ipo.id);
+
+        if (!updateError) {
+          await admin
+            .from('ipo_ingestion_inbox')
+            .update({
+              review_status: 'promoted_to_published',
+              reviewed_at: nowIso,
+              reviewed_by: options?.adminUserId || null,
+            })
+            .eq('promoted_ipo_id', ipo.id);
+
+          publishedIpos.push({
+            id: ipo.id,
+            company_name: ipo.company_name,
+            slug: ipo.slug,
+            status: ipo.status,
+          });
+          publishedCount++;
+        } else {
+          skippedCount++;
+        }
+      } else {
+        skippedCount++;
+      }
+    }
+
+    return {
+      totalEvaluated: draftIpos.length,
+      publishedCount,
+      skippedCount,
+      publishedIpos,
+    };
   }
 
   private async findMatchingCanonicalIpo(

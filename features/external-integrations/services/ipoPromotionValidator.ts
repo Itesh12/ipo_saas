@@ -1,35 +1,32 @@
 /**
  * features/external-integrations/services/ipoPromotionValidator.ts
  *
- * Phase 9 Stage 3A.3: Seven-Field Canonical Promotion Gatekeeper.
+ * Phase 9 Stage 3A.5: Two-Tier Canonical Existence & Publication Gatekeeper.
  *
- * Enforces strict validation before any ingestion candidate can be promoted to the
- * canonical production `ipos` catalog.
- *
- * Incorporates Mandatory Correction 2:
- * - Uses existing Phase 2 schema enum `ipo_issue_type`: 'book_building' | 'fixed_price'.
- * - Normalizes source terms without altering canonical schema.
- *
- * Seven Required Fields:
- * 1. Issuer / Company Name
- * 2. Issue Type ('book_building' | 'fixed_price')
- * 3. Price Band (low and high present, > 0, high >= low)
- * 4. Lot Size (positive integer > 0)
- * 5. Bidding Start Date (valid YYYY-MM-DD)
- * 6. Bidding End Date (valid YYYY-MM-DD >= open_date)
- * 7. Listing Exchange (valid exchange identifier, e.g. 'NSE', 'BSE', 'NSE, BSE')
- *
- * Additional Gate Conditions:
- * - Fails closed if candidate has unresolved conflicts (Tier-1 freeze).
- * - Rejects excluded or withdrawn filings.
+ * Replaces the monolithic existence gate with two distinct evaluators:
+ * 1. validateCanonicalExistence(): Checks whether a record has sufficient legal identity
+ *    and source provenance to exist in the canonical IPO master universe.
+ *    (Allows price_band = NULL, open_date = NULL, lot_size = NULL for announced DRHP filings).
+ * 2. evaluatePublicationEligibility(): Enforces explicit product publication policies.
+ *    (Requires instrument_type ∈ {IPO, SME_IPO}, not withdrawn/cancelled, zero conflicts).
+ * 3. evaluateDataCompleteness(): Derives the 5-state data completeness matrix
+ *    ('discovered' | 'partial' | 'verified' | 'complete' | 'conflicted').
  */
 
-import { NormalizedIpoMasterPayload, CanonicalInboxRecord } from '../ipo-master/ipoMasterTypes';
+import {
+  NormalizedIpoMasterPayload,
+  CanonicalInboxRecord,
+  IPODataQuality,
+  IPOInstrumentType,
+} from '../ipo-master/ipoMasterTypes';
 
 export type CanonicalIssueType = 'book_building' | 'fixed_price';
+export type PublicationPolicy = 'strict_trading_only' | 'full_market_pipeline';
 
 export interface PromotionValidationResult {
   eligible: boolean;
+  canPublish: boolean;
+  dataQuality: IPODataQuality;
   passedFields: string[];
   missingFields: string[];
   rejectionReasons: string[];
@@ -37,7 +34,12 @@ export interface PromotionValidationResult {
 }
 
 export class IpoPromotionValidator {
-  public static readonly REQUIRED_CANONICAL_FIELDS = [
+  public static readonly REQUIRED_EXISTENCE_FIELDS = [
+    'company_name',
+    'instrument_type',
+  ] as const;
+
+  public static readonly REQUIRED_TRADING_FIELDS = [
     'company_name',
     'issue_type',
     'price_band',
@@ -49,7 +51,6 @@ export class IpoPromotionValidator {
 
   /**
    * Normalizes arbitrary source issue type representations into canonical Phase 2 schema enum.
-   * Matches existing database constraint: ipo_issue_type AS ENUM ('book_building', 'fixed_price').
    */
   public static normalizeIssueType(raw?: string | null): CanonicalIssueType {
     if (!raw) return 'book_building'; // Standard Indian primary market default
@@ -61,9 +62,10 @@ export class IpoPromotionValidator {
   }
 
   /**
-   * Validates a candidate against the 7-Field Canonical Promotion Gate.
+   * Tier 1 Gate: Validates whether a discovered record has sufficient identity
+   * to qualify as a Canonical IPO entity in the master universe.
    */
-  public static validateForPromotion(
+  public static validateCanonicalExistence(
     inbox: Pick<CanonicalInboxRecord, 'has_conflict' | 'review_status'>,
     payload: Partial<NormalizedIpoMasterPayload>
   ): PromotionValidationResult {
@@ -71,12 +73,12 @@ export class IpoPromotionValidator {
     const missingFields: string[] = [];
     const rejectionReasons: string[] = [];
 
-    // 0. Conflict & Status Gate (Tier-1 Freeze)
+    // Conflict Check
     if (inbox.has_conflict || inbox.review_status === 'conflict_detected' || inbox.review_status === 'conflicted') {
       rejectionReasons.push('Tier-1 conflict active: Record has unresolved inter-source discrepancies');
     }
 
-    // 1. Company Name Gate
+    // Company Name
     if (payload.company_name && payload.company_name.trim().length > 0) {
       passedFields.push('company_name');
     } else {
@@ -84,7 +86,129 @@ export class IpoPromotionValidator {
       rejectionReasons.push('Missing or empty company / issuer legal name');
     }
 
-    // 2. Issue Type Gate (Normalized to Phase 2 enum)
+    // Instrument Type (Equity IPO vs SME vs Debt/Rights)
+    const instType = payload.instrument_type || 'IPO';
+    if (instType === 'IPO' || instType === 'SME_IPO') {
+      passedFields.push('instrument_type');
+    } else {
+      rejectionReasons.push(`Non-equity instrument excluded: ${instType}`);
+    }
+
+    const dataQuality = this.evaluateDataCompleteness(payload, inbox.has_conflict);
+    const eligible = rejectionReasons.length === 0;
+
+    return {
+      eligible,
+      canPublish: eligible,
+      dataQuality,
+      passedFields,
+      missingFields,
+      rejectionReasons,
+      normalizedPayload: eligible ? (payload as NormalizedIpoMasterPayload) : undefined,
+    };
+  }
+
+  /**
+   * Tier 2 Gate: Evaluates whether a Canonical IPO entity is eligible for public display.
+   * Hard Gate 2: Does NOT automatically publish every non-conflicted record.
+   * Verifies instrument_type ∈ {IPO, SME_IPO}, not withdrawn/cancelled, acceptable provenance.
+   */
+  public static evaluatePublicationEligibility(
+    payload: Partial<NormalizedIpoMasterPayload>,
+    policy: PublicationPolicy = 'full_market_pipeline',
+    inboxHasConflict = false
+  ): { canPublish: boolean; reasons: string[] } {
+    const reasons: string[] = [];
+
+    // 1. Conflict Gate
+    if (inboxHasConflict) {
+      reasons.push('Cannot publish: Unresolved Tier-1 conflict');
+    }
+
+    // 2. Instrument Type Gate (Only IPO and SME_IPO on public /ipos)
+    const instType: IPOInstrumentType = payload.instrument_type || 'IPO';
+    if (instType !== 'IPO' && instType !== 'SME_IPO') {
+      reasons.push(`Cannot publish to IPO catalog: Instrument type is ${instType}`);
+    }
+
+    // 3. Lifecycle Status Gate (Do not publish withdrawn or cancelled as active issues)
+    const status = payload.business_status;
+    if (status === 'withdrawn' || status === 'cancelled') {
+      reasons.push(`Cannot publish as active: Issue is ${status}`);
+    }
+
+    // 4. Policy-specific checks
+    if (policy === 'strict_trading_only') {
+      // Must have price band and dates
+      const hasDates = !!payload.open_date && !!payload.close_date;
+      const hasPrice = (Number(payload.price_band_high) > 0) || (Number(payload.price_band_low) > 0);
+      if (!hasDates || !hasPrice) {
+        reasons.push('Cannot publish under strict_trading_only: Missing active trading parameters');
+      }
+    }
+
+    return {
+      canPublish: reasons.length === 0,
+      reasons,
+    };
+  }
+
+  /**
+   * Derives 5-state data completeness.
+   */
+  public static evaluateDataCompleteness(
+    payload: Partial<NormalizedIpoMasterPayload>,
+    hasConflict = false
+  ): IPODataQuality {
+    if (hasConflict) return 'conflicted';
+
+    const hasIssuer = !!payload.company_name && payload.company_name.trim().length > 0;
+    const hasPrice = Number(payload.price_band_high) > 0 && Number(payload.price_band_low) > 0;
+    const hasDates = !!payload.open_date && !!payload.close_date;
+    const hasLot = Number(payload.lot_size) > 0;
+    const hasExchange = !!payload.exchange;
+
+    if (hasIssuer && hasPrice && hasDates && hasLot && hasExchange) {
+      return 'complete';
+    }
+    if (hasIssuer && hasPrice && hasDates) {
+      return 'verified';
+    }
+    if (hasIssuer && (payload.drhp_url || payload.rhp_url || payload.prospectus_url || payload.open_date)) {
+      return 'partial';
+    }
+    return 'discovered';
+  }
+
+  /**
+   * Preserves backward compatibility with earlier callers while applying Stage 3A.5 inclusive rules.
+   */
+  public static validateForPromotion(
+    inbox: Pick<CanonicalInboxRecord, 'has_conflict' | 'review_status'>,
+    payload: Partial<NormalizedIpoMasterPayload>,
+    options?: { allowPendingLotSize?: boolean; allowAnnounced?: boolean }
+  ): PromotionValidationResult {
+    // If allowAnnounced is true or default Stage 3A.5 behavior, use canonical existence validation
+    if (options?.allowAnnounced !== false) {
+      return this.validateCanonicalExistence(inbox, payload);
+    }
+
+    // Strict 7-field check for legacy test paths
+    const passedFields: string[] = [];
+    const missingFields: string[] = [];
+    const rejectionReasons: string[] = [];
+
+    if (inbox.has_conflict || inbox.review_status === 'conflict_detected' || inbox.review_status === 'conflicted') {
+      rejectionReasons.push('Tier-1 conflict active: Record has unresolved inter-source discrepancies');
+    }
+
+    if (payload.company_name && payload.company_name.trim().length > 0) {
+      passedFields.push('company_name');
+    } else {
+      missingFields.push('company_name');
+      rejectionReasons.push('Missing or empty company / issuer legal name');
+    }
+
     const normalizedIssueType = this.normalizeIssueType(payload.issue_type);
     if (normalizedIssueType === 'book_building' || normalizedIssueType === 'fixed_price') {
       passedFields.push('issue_type');
@@ -93,7 +217,6 @@ export class IpoPromotionValidator {
       rejectionReasons.push('Invalid issue type');
     }
 
-    // 3. Price Band Gate (Numeric verification, positive, high >= low)
     const low = Number(payload.price_band_low);
     const high = Number(payload.price_band_high);
     const hasValidLow = !isNaN(low) && low > 0;
@@ -101,80 +224,59 @@ export class IpoPromotionValidator {
 
     if (hasValidLow && hasValidHigh && high >= low) {
       passedFields.push('price_band');
-    } else if (hasValidLow && !hasValidHigh && normalizedIssueType === 'fixed_price') {
-      // Fixed price with single price value
-      passedFields.push('price_band');
     } else {
       missingFields.push('price_band');
-      rejectionReasons.push(
-        `Price band incomplete or unannounced (low: ₹${payload.price_band_low ?? 'null'}, high: ₹${payload.price_band_high ?? 'null'})`
-      );
+      rejectionReasons.push(`Price band incomplete or unannounced`);
     }
 
-    // 4. Lot Size Gate (Integer > 0)
-    const lotSize = Number(payload.lot_size);
-    if (!isNaN(lotSize) && Number.isInteger(lotSize) && lotSize > 0) {
+    const rawLot = payload.lot_size;
+    let _lotSize: number | null = null;
+    if (rawLot !== undefined && rawLot !== null && String(rawLot).trim() !== '') {
+      const parsed = Number(rawLot);
+      if (!isNaN(parsed) && Number.isInteger(parsed) && parsed > 0) {
+        _lotSize = parsed;
+        passedFields.push('lot_size');
+      } else {
+        missingFields.push('lot_size');
+        rejectionReasons.push('Invalid lot size');
+      }
+    } else if (options?.allowPendingLotSize) {
       passedFields.push('lot_size');
     } else {
       missingFields.push('lot_size');
-      rejectionReasons.push(`Lot size is missing or invalid (${payload.lot_size ?? 'null'})`);
+      rejectionReasons.push('Missing lot size');
     }
 
-    // 5. Bidding Start Date Gate (ISO YYYY-MM-DD)
-    if (payload.open_date && this.isValidDateString(payload.open_date)) {
+    if (payload.open_date && /^\d{4}-\d{2}-\d{2}$/.test(payload.open_date)) {
       passedFields.push('open_date');
     } else {
       missingFields.push('open_date');
-      rejectionReasons.push('Bidding start date (open_date) is missing or invalid');
+      rejectionReasons.push('Missing open date');
     }
 
-    // 6. Bidding End Date Gate (ISO YYYY-MM-DD >= open_date)
-    if (
-      payload.close_date &&
-      this.isValidDateString(payload.close_date) &&
-      payload.open_date &&
-      payload.close_date >= payload.open_date
-    ) {
+    if (payload.close_date && /^\d{4}-\d{2}-\d{2}$/.test(payload.close_date)) {
       passedFields.push('close_date');
     } else {
       missingFields.push('close_date');
-      rejectionReasons.push('Bidding end date (close_date) is missing or precedes open_date');
+      rejectionReasons.push('Missing close date');
     }
 
-    // 7. Listing Exchange Gate
     if (payload.exchange && payload.exchange.trim().length > 0) {
       passedFields.push('exchange');
     } else {
       missingFields.push('exchange');
-      rejectionReasons.push('Listing exchange is unspecified');
+      rejectionReasons.push('Missing exchange');
     }
 
-    const eligible = missingFields.length === 0 && rejectionReasons.length === 0;
-
+    const eligible = rejectionReasons.length === 0;
     return {
       eligible,
+      canPublish: eligible,
+      dataQuality: eligible ? 'complete' : 'partial',
       passedFields,
       missingFields,
       rejectionReasons,
-      normalizedPayload: eligible
-        ? {
-            ...payload,
-            company_name: payload.company_name!.trim(),
-            issue_type: normalizedIssueType,
-            price_band_low: low,
-            price_band_high: hasValidHigh ? high : low,
-            lot_size: lotSize,
-            open_date: payload.open_date!,
-            close_date: payload.close_date!,
-            exchange: payload.exchange!.trim(),
-          } as NormalizedIpoMasterPayload
-        : undefined,
+      normalizedPayload: eligible ? (payload as NormalizedIpoMasterPayload) : undefined,
     };
-  }
-
-  private static isValidDateString(val: string): boolean {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false;
-    const d = new Date(val);
-    return !isNaN(d.getTime());
   }
 }

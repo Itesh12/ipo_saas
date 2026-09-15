@@ -22,6 +22,12 @@ export type IPOAllotmentEstimateRow = Database["public"]["Tables"]["ipo_allotmen
 export type IPOScoreRow = Database["public"]["Tables"]["ipo_scores"]["Row"];
 export type IPODocumentRow = Database["public"]["Tables"]["ipo_documents"]["Row"];
 export type IPONewsRow = Database["public"]["Tables"]["ipo_news"]["Row"];
+export type IPONewsObservationRow = Database["public"]["Tables"]["ipo_news_observations"]["Row"];
+
+export type NewsCategory = Database["public"]["Enums"]["news_category"];
+export type NewsAuthoritativeness = Database["public"]["Enums"]["news_authoritativeness"];
+export type NewsVerificationStatus = Database["public"]["Enums"]["news_verification_status"];
+export type RegulatoryEventType = Database["public"]["Enums"]["regulatory_event_type"];
 
 export type SubscriptionFeedScope = Database["public"]["Enums"]["subscription_feed_scope"];
 export type SubscriptionAnomalyStatus = Database["public"]["Enums"]["subscription_anomaly_status"];

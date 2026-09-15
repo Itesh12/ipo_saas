@@ -103,14 +103,8 @@ export class IpoDiscoveryEngine {
       };
     }
 
-    if (text.includes('withdrawn') || text.includes('cancelled') || text.includes('rejected')) {
-      return {
-        documentType: 'IPO_MASTER',
-        isEquityIpo: true,
-        isExcluded: true,
-        exclusionReason: 'Excluded: Filing withdrawn, rejected or cancelled by regulatory body',
-      };
-    }
+    // 1b. Withdrawn/cancelled filings are retained for audit trail, not excluded from database
+    // (They will be marked with status 'withdrawn' or 'cancelled' in canonical resolution)
 
     // 2. Classify document type
     let documentType: IngestionDocumentType = 'IPO_MASTER';

@@ -89,6 +89,32 @@ export type GMPAnomalyStatus =
 
 export type GMPFreshnessState = "fresh" | "aging" | "stale" | "expired";
 
+export type NewsCategory =
+  | "regulatory_announcement"
+  | "price_band_revision"
+  | "issue_extension"
+  | "governance_litigation"
+  | "market_commentary"
+  | "general_news";
+
+export type NewsAuthoritativeness = "official_regulatory" | "third_party_media";
+
+export type NewsVerificationStatus = "verified" | "unverified" | "quarantined_unmatched";
+
+export type RegulatoryEventType =
+  | "price_band_changed"
+  | "issue_open_date_changed"
+  | "issue_close_date_changed"
+  | "issue_withdrawn"
+  | "issue_extended"
+  | "listing_date_changed"
+  | "rhp_filed"
+  | "corrigendum_filed"
+  | "anchor_allocation_published"
+  | "basis_of_allotment_published"
+  | "litigation_disclosed"
+  | "material_adverse_event";
+
 export type IPORiskSeverity = "low" | "medium" | "high";
 
 export type IPOSentiment = "positive" | "neutral" | "negative" | "cautious";
@@ -255,7 +281,7 @@ export interface Database {
           price_band_low: number | null;
           price_band_high: number | null;
           face_value: number | null;
-          lot_size: number;
+          lot_size: number | null;
           min_investment: number | null;
           issue_size_cr: number | null;
           fresh_issue_cr: number | null;
@@ -283,6 +309,7 @@ export interface Database {
           provenance?: Json | null;
           is_listing_confirmed?: boolean;
           designated_exchange?: string | null;
+          lot_size_status?: string | null;
         };
         Insert: {
           id?: string;
@@ -297,7 +324,7 @@ export interface Database {
           price_band_low?: number | null;
           price_band_high?: number | null;
           face_value?: number | null;
-          lot_size?: number;
+          lot_size?: number | null;
           min_investment?: number | null;
           issue_size_cr?: number | null;
           fresh_issue_cr?: number | null;
@@ -325,6 +352,7 @@ export interface Database {
           provenance?: Json | null;
           is_listing_confirmed?: boolean;
           designated_exchange?: string | null;
+          lot_size_status?: string | null;
         };
         Update: {
           id?: string;
@@ -339,7 +367,7 @@ export interface Database {
           price_band_low?: number | null;
           price_band_high?: number | null;
           face_value?: number | null;
-          lot_size?: number;
+          lot_size?: number | null;
           min_investment?: number | null;
           issue_size_cr?: number | null;
           fresh_issue_cr?: number | null;
@@ -367,6 +395,7 @@ export interface Database {
           provenance?: Json | null;
           is_listing_confirmed?: boolean;
           designated_exchange?: string | null;
+          lot_size_status?: string | null;
         };
       };
       ipo_events: {
@@ -1465,6 +1494,18 @@ export interface Database {
           sentiment: IPOSentiment;
           published_at: string;
           created_at: string;
+          category?: NewsCategory;
+          authoritativeness?: NewsAuthoritativeness;
+          verification_status?: NewsVerificationStatus;
+          content_hash?: string | null;
+          story_cluster_id?: string | null;
+          canonical_story_id?: string | null;
+          publisher_id?: string;
+          independence_group?: string;
+          is_price_sensitive?: boolean;
+          structured_event_type?: RegulatoryEventType | null;
+          relevance_score?: number;
+          source_observation_id?: string | null;
         };
         Insert: {
           id?: string;
@@ -1476,6 +1517,18 @@ export interface Database {
           sentiment?: IPOSentiment;
           published_at: string;
           created_at?: string;
+          category?: NewsCategory;
+          authoritativeness?: NewsAuthoritativeness;
+          verification_status?: NewsVerificationStatus;
+          content_hash?: string | null;
+          story_cluster_id?: string | null;
+          canonical_story_id?: string | null;
+          publisher_id?: string;
+          independence_group?: string;
+          is_price_sensitive?: boolean;
+          structured_event_type?: RegulatoryEventType | null;
+          relevance_score?: number;
+          source_observation_id?: string | null;
         };
         Update: {
           id?: string;
@@ -1486,6 +1539,101 @@ export interface Database {
           source_url?: string | null;
           sentiment?: IPOSentiment;
           published_at?: string;
+          created_at?: string;
+          category?: NewsCategory;
+          authoritativeness?: NewsAuthoritativeness;
+          verification_status?: NewsVerificationStatus;
+          content_hash?: string | null;
+          story_cluster_id?: string | null;
+          canonical_story_id?: string | null;
+          publisher_id?: string;
+          independence_group?: string;
+          is_price_sensitive?: boolean;
+          structured_event_type?: RegulatoryEventType | null;
+          relevance_score?: number;
+          source_observation_id?: string | null;
+        };
+      };
+      ipo_news_observations: {
+        Row: {
+          id: string;
+          ipo_id: string | null;
+          source_observation_id: string | null;
+          source_observation_uid: string;
+          source_observation_hash: string;
+          news_source: string;
+          source_family: string;
+          publisher_id: string;
+          upstream_source_id: string | null;
+          independence_group: string;
+          headline: string;
+          excerpt: string | null;
+          raw_regulatory_content: string | null;
+          source_url: string;
+          published_at: string;
+          content_hash: string;
+          story_cluster_id: string;
+          authoritativeness: NewsAuthoritativeness;
+          category: NewsCategory;
+          verification_status: NewsVerificationStatus;
+          is_price_sensitive: boolean;
+          matched_entity_id: string | null;
+          resolution_method: string | null;
+          resolution_confidence: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ipo_id?: string | null;
+          source_observation_id?: string | null;
+          source_observation_uid: string;
+          source_observation_hash: string;
+          news_source: string;
+          source_family: string;
+          publisher_id: string;
+          upstream_source_id?: string | null;
+          independence_group: string;
+          headline: string;
+          excerpt?: string | null;
+          raw_regulatory_content?: string | null;
+          source_url: string;
+          published_at: string;
+          content_hash: string;
+          story_cluster_id?: string;
+          authoritativeness?: NewsAuthoritativeness;
+          category?: NewsCategory;
+          verification_status?: NewsVerificationStatus;
+          is_price_sensitive?: boolean;
+          matched_entity_id?: string | null;
+          resolution_method?: string | null;
+          resolution_confidence?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ipo_id?: string | null;
+          source_observation_id?: string | null;
+          source_observation_uid?: string;
+          source_observation_hash?: string;
+          news_source?: string;
+          source_family?: string;
+          publisher_id?: string;
+          upstream_source_id?: string | null;
+          independence_group?: string;
+          headline?: string;
+          excerpt?: string | null;
+          raw_regulatory_content?: string | null;
+          source_url?: string;
+          published_at?: string;
+          content_hash?: string;
+          story_cluster_id?: string;
+          authoritativeness?: NewsAuthoritativeness;
+          category?: NewsCategory;
+          verification_status?: NewsVerificationStatus;
+          is_price_sensitive?: boolean;
+          matched_entity_id?: string | null;
+          resolution_method?: string | null;
+          resolution_confidence?: number;
           created_at?: string;
         };
       };
@@ -2229,6 +2377,10 @@ export interface Database {
       gmp_trend_direction: GMPTrendDirection;
       gmp_anomaly_status: GMPAnomalyStatus;
       gmp_freshness_state: GMPFreshnessState;
+      news_category: NewsCategory;
+      news_authoritativeness: NewsAuthoritativeness;
+      news_verification_status: NewsVerificationStatus;
+      regulatory_event_type: RegulatoryEventType;
     };
   };
 }

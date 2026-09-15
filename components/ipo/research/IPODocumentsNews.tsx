@@ -150,53 +150,106 @@ export function IPODocumentsNews({ documents, news }: IPODocumentsNewsProps) {
         </CardContent>
       </Card>
 
-      {/* Attributed News Feed */}
+      {/* Attributed News Feed & Regulatory Circulars */}
       <Card className="border-[var(--border-subtle)] bg-[var(--bg-surface)]">
         <CardHeader className="py-3.5 px-5 bg-[var(--bg-surface-elevated)]/30 border-b border-[var(--border-subtle)] flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <Newspaper className="w-4 h-4 text-[var(--brand-primary)]" />
-            <CardTitle className="text-sm">Curated Coverage & News</CardTitle>
+            <CardTitle className="text-sm">Exchange Notices & Media Intelligence</CardTitle>
           </div>
-          <span className="text-xs text-[var(--text-muted)]">Attributed Sources</span>
+          <span className="text-xs text-[var(--text-muted)]">Verified Provenance</span>
         </CardHeader>
 
-        <CardContent className="p-5 space-y-3">
+        <CardContent className="p-5 space-y-3.5">
           {news.length === 0 ? (
             <p className="text-xs text-[var(--text-muted)] py-4 text-center">
-              No recent news coverage indexed for this issue.
+              No recent official announcements or news coverage indexed for this issue.
             </p>
           ) : (
-            news.map((item) => (
-              <div
-                key={item.id}
-                className="p-3 rounded-lg bg-[var(--bg-surface-elevated)]/40 border border-[var(--border-subtle)] space-y-1.5 hover:border-[var(--border-subtle)]/80 transition-colors"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <a
-                    href={item.source_url || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-[var(--text-primary)] hover:text-[var(--brand-primary)] transition-colors flex items-center gap-1"
-                  >
-                    <span>{item.headline}</span>
-                    <ExternalLink className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                  </a>
-                  {getSentimentBadge(item.sentiment)}
+            news.map((item) => {
+              const isOfficial = item.authoritativeness === "official_regulatory";
+              const isPriceSensitive = !!item.is_price_sensitive;
+              const isVerified = item.verification_status === "verified";
+
+              return (
+                <div
+                  key={item.id}
+                  className={`p-3.5 rounded-lg border transition-colors space-y-2 ${
+                    isOfficial
+                      ? "bg-emerald-950/10 border-emerald-800/30 hover:border-emerald-700/50"
+                      : "bg-[var(--bg-surface-elevated)]/40 border-[var(--border-subtle)] hover:border-[var(--border-subtle)]/80"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {isOfficial ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60">
+                        <ShieldCheck className="w-3 h-3" />
+                        Official Regulatory Notice
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-800/40 px-2 py-0.5 rounded border border-slate-700/50">
+                        Market Coverage
+                      </span>
+                    )}
+
+                    {isPriceSensitive && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/60">
+                        <AlertCircle className="w-3 h-3" />
+                        Price Sensitive
+                      </span>
+                    )}
+
+                    {item.category && item.category !== "general_news" && (
+                      <span className="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--bg-surface)] px-2 py-0.5 rounded border border-[var(--border-subtle)] uppercase tracking-wider">
+                        {item.category.replace(/_/g, " ")}
+                      </span>
+                    )}
+
+                    {getSentimentBadge(item.sentiment)}
+                  </div>
+
+                  <div>
+                    <a
+                      href={item.source_url || "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-[var(--text-primary)] hover:text-[var(--brand-primary)] transition-colors inline-flex items-center gap-1 leading-snug"
+                    >
+                      <span>{item.headline}</span>
+                      <ExternalLink className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
+                    </a>
+                  </div>
+
+                  {item.summary && (
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed line-clamp-3">
+                      {item.summary}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--text-muted)] pt-1 border-t border-[var(--border-subtle)]/40">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-[var(--text-secondary)]">
+                        {item.publisher_id || item.source || "Official Source"}
+                      </span>
+                      {isVerified && (
+                        <span className="text-emerald-400 font-medium">• Entity Resolved</span>
+                      )}
+                    </div>
+                    {item.published_at && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatDate(item.published_at)}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {item.summary && (
-                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{item.summary}</p>
-                )}
-                <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)] pt-0.5">
-                  <span className="font-medium text-[var(--text-secondary)]">{item.source}</span>
-                  <span>•</span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {formatDate(item.published_at)}
-                  </span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
+
+          <div className="pt-2 border-t border-[var(--border-subtle)]/60 text-[10px] text-[var(--text-muted)] leading-relaxed italic">
+            Third-party media excerpts are capped to statutory quotes under fair dealing. Official regulatory circulars are sourced from SEBI, BSE, and NSE repositories.
+          </div>
         </CardContent>
       </Card>
     </div>

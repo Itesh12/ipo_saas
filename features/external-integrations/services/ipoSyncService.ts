@@ -22,10 +22,12 @@ import { nseSourceClient, NseClientError } from '../clients/nseSourceClient';
 import { bseSourceClient } from '../clients/bseSourceClient';
 import { SebiPublicIssuesExtractor } from '../adapters/sebiExtractor';
 import { NseIngestionAdapter } from '../adapters/nseExtractor';
-import { IpoDiscoveryEngine } from './ipoDiscoveryEngine';
+import { HistoricalExchangeAdapter } from '../adapters/historicalExchangeAdapter';
 import { ipoIngestionService } from './ipoIngestionService';
+import { IpoDiscoveryEngine } from './ipoDiscoveryEngine';
+import { IpoCoverageReconciliationService } from './ipoCoverageReconciliationService';
 
-export type SyncSource = 'sebi' | 'nse' | 'bse' | 'all';
+export type SyncSource = 'sebi' | 'nse' | 'bse' | 'sebi_archive' | 'all';
 
 export interface SourceSyncMetrics {
   source: string;
@@ -49,6 +51,8 @@ export interface MasterSyncResult {
   successfulSources: number;
   failedSources: number;
   metrics: SourceSyncMetrics[];
+  draftPromotions?: number;
+  publishedCount?: number;
 }
 
 // In-memory mutex for concurrency protection across sync runs
@@ -67,8 +71,8 @@ export class IpoSyncService {
     const startedAt = new Date().toISOString();
     const metrics: SourceSyncMetrics[] = [];
 
-    const sourcesToRun: Array<'sebi' | 'nse' | 'bse'> =
-      sourceTarget === 'all' ? ['sebi', 'nse', 'bse'] : [sourceTarget];
+    const sourcesToRun: Array<'sebi' | 'nse' | 'bse' | 'sebi_archive'> =
+      sourceTarget === 'all' ? ['sebi', 'nse', 'bse', 'sebi_archive'] : [sourceTarget];
 
     for (const src of sourcesToRun) {
       // Concurrency guard per source
@@ -90,18 +94,42 @@ export class IpoSyncService {
 
       activeSyncLocks.add(src);
       try {
+        console.log(`[IpoSyncService] Starting sync for source: ${src}...`);
         let m: SourceSyncMetrics;
         if (src === 'sebi') {
           m = await this.syncSebi(options);
         } else if (src === 'nse') {
           m = await this.syncNse(options);
+        } else if (src === 'sebi_archive') {
+          m = await this.syncArchive(options);
         } else {
           m = await this.syncBse();
         }
+        console.log(`[IpoSyncService] Completed ${src}: status=${m.status}, discovered=${m.recordsDiscovered}, ingested=${m.recordsIngested}`);
         metrics.push(m);
       } finally {
         activeSyncLocks.delete(src);
       }
+    }
+
+    // Phase 9 Stage 3A.5: Automated Promotion & Publication Loop
+    // Promotes all valid canonical IPO candidates (Announced, Upcoming, Open, Listed)
+    // and publishes them under the explicit full_market_pipeline policy.
+    let draftPromotions = 0;
+    let publishedCount = 0;
+    try {
+      const { ipoCanonicalPromotionService } = await import('./ipoCanonicalPromotionService');
+      const draftRes = await ipoCanonicalPromotionService.batchPromoteCandidatesToDraft({
+        allowPendingLotSize: true,
+      });
+      draftPromotions = draftRes.promotedToDraft;
+
+      const pubRes = await ipoCanonicalPromotionService.publishEligibleCanonicalIpos({
+        policy: 'full_market_pipeline',
+      });
+      publishedCount = pubRes.publishedCount;
+    } catch (promoErr) {
+      console.warn('[IpoSyncService] Automated promotion/publication step encountered error:', promoErr);
     }
 
     const finishedAt = new Date().toISOString();
@@ -115,6 +143,8 @@ export class IpoSyncService {
       successfulSources,
       failedSources,
       metrics,
+      draftPromotions,
+      publishedCount,
     };
   }
 
@@ -166,6 +196,14 @@ export class IpoSyncService {
           );
 
           if (classification.isExcluded) {
+            IpoCoverageReconciliationService.logRejection({
+              source: 'sebi',
+              external_id: extraction.external_id,
+              document_title: extraction.normalized_payload.company_name,
+              reason_code: 'NON_IPO_INSTRUMENT',
+              reason_detail: classification.exclusionReason || 'Non-equity instrument',
+              rejected_at: new Date().toISOString(),
+            });
             continue; // Excluded instruments do not count as equity candidates
           }
 
@@ -299,6 +337,14 @@ export class IpoSyncService {
           );
 
           if (classification.isExcluded) {
+            IpoCoverageReconciliationService.logRejection({
+              source: 'nse',
+              external_id: extraction.external_id,
+              document_title: extraction.normalized_payload.company_name,
+              reason_code: 'NON_IPO_INSTRUMENT',
+              reason_detail: classification.exclusionReason || 'Non-equity instrument',
+              rejected_at: new Date().toISOString(),
+            });
             continue;
           }
 
@@ -429,6 +475,108 @@ export class IpoSyncService {
       error: result.reason,
       durationMs,
     };
+  }
+
+  /**
+   * Synchronizes official historical archive batch from SEBI Final Offer Documents (smid=12).
+   * Real Network Origin, Zero Fixtures (Hard Gate 1).
+   */
+  private async syncArchive(options?: { initiatedBy?: string; nowIST?: string }): Promise<SourceSyncMetrics> {
+    const admin = createAdminClient();
+    const startMs = Date.now();
+
+    const { data: runRecord } = await admin
+      .from('ipo_source_sync_runs')
+      .insert({
+        source: 'sebi_archive',
+        status: 'running',
+        parser_version: IpoSyncService.PARSER_VERSION,
+        metadata: { initiatedBy: options?.initiatedBy || 'system' },
+      })
+      .select('id')
+      .single();
+
+    const runId = runRecord?.id || `archive-${Date.now()}`;
+    const adapter = new HistoricalExchangeAdapter();
+
+    try {
+      const extractions = await adapter.fetchArchiveBatch();
+      const recordsDiscovered = extractions.length;
+      let recordsIngested = 0;
+      let recordsUnchanged = 0;
+      let recordsConflicted = 0;
+      let recordsFailed = 0;
+
+      for (const extraction of extractions) {
+        try {
+          const outcome = await ipoIngestionService.ingestObservation(extraction);
+          if (outcome.isDuplicate) {
+            recordsUnchanged++;
+          } else if (outcome.hasConflict) {
+            recordsConflicted++;
+            recordsIngested++;
+          } else {
+            recordsIngested++;
+          }
+        } catch (_itemErr) {
+          recordsFailed++;
+        }
+      }
+
+      const durationMs = Date.now() - startMs;
+      await admin
+        .from('ipo_source_sync_runs')
+        .update({
+          finished_at: new Date().toISOString(),
+          status: 'success',
+          http_status: 200,
+          records_discovered: recordsDiscovered,
+          records_ingested: recordsIngested,
+          records_unchanged: recordsUnchanged,
+          records_conflicted: recordsConflicted,
+          records_failed: recordsFailed,
+          metadata: { durationMs, initiatedBy: options?.initiatedBy || 'system' },
+        })
+        .eq('id', runId);
+
+      return {
+        source: 'sebi_archive',
+        runId,
+        status: 'success',
+        httpStatus: 200,
+        recordsDiscovered,
+        recordsIngested,
+        recordsUnchanged,
+        recordsConflicted,
+        recordsFailed,
+        durationMs,
+      };
+    } catch (err: unknown) {
+      const durationMs = Date.now() - startMs;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await admin
+        .from('ipo_source_sync_runs')
+        .update({
+          finished_at: new Date().toISOString(),
+          status: 'failed',
+          sanitized_error: errorMsg,
+          duration_ms: durationMs,
+        })
+        .eq('id', runId);
+
+      return {
+        source: 'sebi_archive',
+        runId,
+        status: 'failed',
+        recordsDiscovered: 0,
+        recordsIngested: 0,
+        recordsUnchanged: 0,
+        recordsConflicted: 0,
+        recordsFailed: 0,
+        error: errorMsg,
+        durationMs,
+      };
+    }
   }
 }
 

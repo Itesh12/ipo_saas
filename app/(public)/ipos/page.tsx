@@ -4,9 +4,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { IPOCard } from "@/components/ipo/IPOCard";
 import { IPOFilterBar } from "@/components/ipo/IPOFilterBar";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { getPublishedIPOs } from "@/features/ipo/services/ipoService";
+import { getPublishedIPOs, getIPOUniverseCounts } from "@/features/ipo/services/ipoService";
 import { IPOCategory, IPOStatus } from "@/features/ipo/types/ipo.types";
-import { Layers, Flame, Calendar, CheckCircle } from "lucide-react";
+import { Layers, Flame, Calendar, CheckCircle, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PageProps {
@@ -28,23 +28,28 @@ export default async function IposPage({ searchParams }: PageProps) {
   const sortBy = (params.sort as "open_date" | "close_date" | "listing_date" | "issue_size" | "company_name") || "open_date";
 
   // Determine effective status filter combined with tab
-  let effectiveStatus: IPOStatus | "all" | "current" | "upcoming" | "past" = statusFilter;
+  let effectiveStatus: IPOStatus | "all" | "current" | "upcoming" | "announced" | "past" = statusFilter;
   if (activeTab === "current") effectiveStatus = "current";
   else if (activeTab === "upcoming") effectiveStatus = "upcoming";
+  else if (activeTab === "announced") effectiveStatus = "announced";
   else if (activeTab === "past") effectiveStatus = "past";
 
-  const { ipos, totalCount } = await getPublishedIPOs({
-    category,
-    status: effectiveStatus,
-    searchQuery,
-    sortBy,
-  });
+  const [{ ipos, totalCount }, counts] = await Promise.all([
+    getPublishedIPOs({
+      category,
+      status: effectiveStatus,
+      searchQuery,
+      sortBy,
+    }),
+    getIPOUniverseCounts(),
+  ]);
 
   const tabItems = [
-    { id: "all", label: "All IPOs", icon: Layers, href: "/ipos" },
-    { id: "current", label: "Current (Open)", icon: Flame, href: "/ipos?tab=current" },
-    { id: "upcoming", label: "Upcoming", icon: Calendar, href: "/ipos?tab=upcoming" },
-    { id: "past", label: "Past & Listed", icon: CheckCircle, href: "/ipos?tab=past" },
+    { id: "all", label: `All IPOs (${counts.all})`, icon: Layers, href: "/ipos" },
+    { id: "current", label: `Current (${counts.current})`, icon: Flame, href: "/ipos?tab=current" },
+    { id: "upcoming", label: `Upcoming (${counts.upcoming})`, icon: Calendar, href: "/ipos?tab=upcoming" },
+    { id: "announced", label: `Announced (${counts.announced})`, icon: FileText, href: "/ipos?tab=announced" },
+    { id: "past", label: `Past (${counts.past})`, icon: CheckCircle, href: "/ipos?tab=past" },
   ];
 
   return (

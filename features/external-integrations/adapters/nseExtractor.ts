@@ -40,11 +40,28 @@ export class NseIngestionAdapter {
     const issueSizeCr = this.parseIssueSize(raw.issueSize);
     const observedAt = new Date().toISOString();
 
+    const isSme = raw.series === 'SM' || raw.companyName.toLowerCase().includes('sme');
+    const instrumentType = isSme ? 'SME_IPO' : 'IPO';
+    const year = openDate ? parseInt(openDate.slice(0, 4), 10) : new Date().getFullYear();
+    const cleanSym = (raw.symbol || 'issue').toLowerCase();
+    const issueIdentity = `${cleanSym}-${instrumentType.toLowerCase()}-${year}`;
+
+    let dataQuality: 'complete' | 'verified' | 'partial' = 'partial';
+    if (low && high && openDate && closeDate && lotSize) {
+      dataQuality = 'complete';
+    } else if (low && high && openDate && closeDate) {
+      dataQuality = 'verified';
+    }
+
     const normalized: NormalizedIpoMasterPayload = {
       company_name: raw.companyName.trim(),
       symbol: raw.symbol ? raw.symbol.toUpperCase().trim() : null,
       isin: raw.isin ? raw.isin.toUpperCase().trim() : null,
       exchange: 'NSE',
+      instrument_type: instrumentType,
+      data_quality: dataQuality,
+      issue_identity: issueIdentity,
+      offering_year: year,
       price_band_low: low,
       price_band_high: high,
       lot_size: lotSize,
@@ -148,18 +165,23 @@ export class NseIngestionAdapter {
     };
   }
 
-  private static parsePriceBand(raw?: string): { low: number | null; high: number | null } {
+  public static parsePriceBand(raw?: string): { low: number | null; high: number | null } {
     if (!raw) return { low: null, high: null };
-    const clean = raw.replace(/[₹,Rs.\s]/gi, '');
-    const parts = clean.split(/[-to]/i).map((p) => parseFloat(p)).filter((n) => !isNaN(n));
-    if (parts.length === 2) {
-      const low = parts[0] <= 0 ? null : parts[0];
-      const high = parts[1] <= 0 ? null : parts[1];
-      return { low, high };
+    const clean = raw.replace(/[₹,Rs.\s]/gi, ' ').trim();
+    const matchTwo = clean.match(/(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)/i);
+    if (matchTwo) {
+      const low = parseFloat(matchTwo[1]);
+      const high = parseFloat(matchTwo[2]);
+      return {
+        low: isNaN(low) || low <= 0 ? null : low,
+        high: isNaN(high) || high <= 0 ? null : high,
+      };
     }
-    if (parts.length === 1) {
-      const val = parts[0] <= 0 ? null : parts[0];
-      return { low: val, high: val };
+    const matchOne = clean.match(/(\d+(?:\.\d+)?)/);
+    if (matchOne) {
+      const val = parseFloat(matchOne[1]);
+      const safeVal = isNaN(val) || val <= 0 ? null : val;
+      return { low: safeVal, high: safeVal };
     }
     return { low: null, high: null };
   }
@@ -176,10 +198,38 @@ export class NseIngestionAdapter {
     return isNaN(parsed) || parsed <= 0 ? null : parsed;
   }
 
-  private static parseDate(raw?: string): string | null {
+  public static parseDate(raw?: string): string | null {
     if (!raw) return null;
-    const d = new Date(raw);
+    const trimmed = raw.trim();
+
+    // 1. Direct match for DD-Mon-YYYY (e.g. "11-Sep-2026")
+    const dmyMatch = trimmed.match(/^(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ](\d{4})$/);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, '0');
+      const monStr = dmyMatch[2].toLowerCase();
+      const year = dmyMatch[3];
+      const MONTHS: Record<string, string> = {
+        jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+        jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+      };
+      if (MONTHS[monStr]) {
+        return `${year}-${MONTHS[monStr]}-${day}`;
+      }
+    }
+
+    // 2. Direct match for YYYY-MM-DD
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    }
+
+    // 3. Fallback: Parse in IST (Asia/Kolkata) without UTC rollback
+    const d = new Date(trimmed);
     if (isNaN(d.getTime())) return null;
-    return d.toISOString().split('T')[0];
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+    } catch {
+      return d.toISOString().split('T')[0];
+    }
   }
 }

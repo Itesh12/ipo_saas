@@ -73,6 +73,7 @@ export const ADMIN_NAV: NavSection[] = [
     sectionTitle: "Operations Command",
     items: [
       { title: "Admin Overview", href: "/admin/dashboard", iconName: "ShieldAlert", minRole: "analyst" },
+      { title: "Universe Coverage", href: "/admin/ipo-coverage", iconName: "Database", minRole: "editor", badge: "Live" },
       { title: "Work Queue", href: "/admin/work-queue", iconName: "CheckSquare", minRole: "analyst" },
       { title: "Data Quality", href: "/admin/data-quality", iconName: "ShieldCheck", minRole: "analyst" },
       { title: "System Health", href: "/admin/system-health", iconName: "Activity", minRole: "admin" },

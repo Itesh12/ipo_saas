@@ -11,6 +11,8 @@ import {
   IngestionDocumentType,
   NormalizedIpoMasterPayload,
   IpoProvenanceMap,
+  IPOInstrumentType,
+  IPODataQuality,
 } from '../ipo-master/ipoMasterTypes';
 
 export interface SebiRawRow {
@@ -40,16 +42,56 @@ export class SebiPublicIssuesExtractor {
   }
 
   /**
+   * Classifies instrument type to strictly separate IPOs/SME IPOs from FPOs, Rights, Debt, REITs, etc.
+   */
+  public static classifyInstrumentType(title: string): IPOInstrumentType {
+    const upper = title.toUpperCase();
+    if (upper.includes('RIGHTS') || upper.includes('RIGHT ISSUE')) return 'RIGHTS';
+    if (upper.includes('DEBT') || upper.includes('NCD') || upper.includes('BOND')) return 'DEBT';
+    if (upper.includes('BUYBACK')) return 'BUYBACK';
+    if (upper.includes('REIT')) return 'REIT';
+    if (upper.includes('INVIT')) return 'INVIT';
+    if (upper.includes('FPO') || upper.includes('FOLLOW-ON') || upper.includes('FURTHER PUBLIC')) return 'FPO';
+    if (upper.includes('OFS') && !upper.includes('IPO')) return 'OFFER_FOR_SALE';
+    if (upper.includes('SME') || upper.includes('EMERGE') || upper.includes('INNOVATORS')) return 'SME_IPO';
+    return 'IPO';
+  }
+
+  /**
    * Normalizes a raw SEBI table row into the canonical IPO master payload.
    */
   public static normalizeRow(row: SebiRawRow): IngestionExtractionResult {
     const documentType = this.classifyDocumentType(row.documentTitle);
+    const instrumentType = this.classifyInstrumentType(row.documentTitle);
     const cleanedName = this.cleanCompanyName(row.companyName);
     const externalId = this.generateExternalId(cleanedName, row.filingDate);
+
+    const yearMatch = row.filingDate.match(/\d{4}/);
+    const offeringYear = yearMatch ? parseInt(yearMatch[0], 10) : new Date().getFullYear();
+
+    const cleanSlug = cleanedName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const issueIdentity = `${cleanSlug}-${instrumentType.toLowerCase()}-${offeringYear}`;
+
+    let dataQuality: IPODataQuality = 'partial';
+    if (documentType === 'PROSPECTUS') {
+      dataQuality = 'verified';
+    } else if (documentType === 'RHP') {
+      dataQuality = 'partial';
+    } else {
+      dataQuality = 'discovered';
+    }
 
     const normalized: NormalizedIpoMasterPayload = {
       company_name: cleanedName,
       lead_managers: row.leadManager ? [row.leadManager.trim()] : undefined,
+      instrument_type: instrumentType,
+      data_quality: dataQuality,
+      issue_identity: issueIdentity,
+      offering_year: offeringYear,
+      business_status: documentType === 'PROSPECTUS' ? 'listed' : 'announced',
     };
 
     if (documentType === 'DRHP' || documentType === 'UDRHP') {
@@ -180,7 +222,7 @@ export class SebiPublicIssuesExtractor {
   private static cleanCompanyName(raw: string): string {
     return raw
       .split(/<br\s*\/?>/i)[0]
-      .replace(/\s*-\s*(Draft\s+Offer\s+Document|Red\s+Herring\s+Prospectus|Prospectus|Addendum|Corrigendum|UDRHP|RHP|DRHP).*$/i, '')
+      .replace(/\s*[-–—:]\s*(Draft\s+Offer\s+Document|Draft\s+Abridged\s+Prospectus|Abridged\s+Prospectus|Red\s+Herring\s+Prospectus|Prospectus|Addendum\s+to\s+RHP|Addendum|Corrigendum|UDRHP|RHP|DRHP|Notice|Errata).*$/i, '')
       .replace(/\s*-\s*filed\s+with\s+(SEBI|ROC).*$/i, '')
       .replace(/<[^>]+>/g, '')
       .replace(/\s+/g, ' ')

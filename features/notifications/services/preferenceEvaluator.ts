@@ -28,6 +28,7 @@ export interface ChannelEvaluationResult {
   deliverEmail: boolean;
   deliverPush: boolean;
   isHeldDueToQuietHours: boolean;
+  deferredUntil: string | null;
   reason: string;
 }
 
@@ -46,41 +47,37 @@ export class PreferenceEvaluator {
   }): ChannelEvaluationResult {
     const { priority, isMandatory, preferences, quietHours, now = new Date() } = params;
 
-    // 1. Mandatory In-App Invariant
+    // 1. Mandatory In-App Invariant vs External Channel Privacy
     // Transactional receipts (mandate pending, funds blocked, allotment, refund, capital)
-    // MUST always be delivered in-app regardless of user preference or quiet hours.
-    const deliverInApp = true;
-    let deliverEmail = preferences?.channelEmail ?? true;
-    let deliverPush = preferences?.channelPush ?? false;
+    // MUST always be delivered in-app. External channels strictly respect user preferences.
+    const deliverInApp = isMandatory ? true : (preferences?.channelInApp ?? true);
+    let deliverEmail = preferences ? preferences.channelEmail : true;
+    let deliverPush = preferences ? preferences.channelPush : false;
 
-    if (!isMandatory && preferences) {
-      // Non-mandatory categories respect user configuration
-      deliverEmail = preferences.channelEmail;
-      deliverPush = preferences.channelPush;
-    }
-
-    // 2. Quiet Hours Evaluation
+    // 2. Quiet Hours Evaluation & Deferral
     const inQuietHours = quietHours?.quietHoursEnabled
       ? this.isCurrentTimeInQuietHours(quietHours, now)
       : false;
 
     let isHeldDueToQuietHours = false;
+    let deferredUntil: string | null = null;
     let reason = 'Normal delivery schedule';
 
     if (inQuietHours) {
       // Urgent alerts strictly bypass quiet hours
       const isUrgent = priority === 'urgent';
 
-      if (isUrgent || isMandatory) {
-        reason = isUrgent
-          ? 'Urgent priority alert bypassed quiet hours'
-          : 'Mandatory transactional receipt delivered immediately';
+      if (isUrgent) {
+        reason = 'Urgent priority alert bypassed quiet hours';
       } else {
-        // Non-urgent, non-mandatory alerts have external push/email held
+        // Non-urgent alerts have external channels deferred until quiet hours conclude
         isHeldDueToQuietHours = true;
         deliverEmail = false;
         deliverPush = false;
-        reason = `Held during user quiet hours (${quietHours?.quietHoursStart} - ${quietHours?.quietHoursEnd} ${quietHours?.timezone || 'Asia/Kolkata'})`;
+
+        // Calculate deferral timestamp (quietHoursEnd)
+        deferredUntil = this.computeQuietHoursEndTimestamp(quietHours!, now);
+        reason = `Deferred until conclusion of user quiet hours (${quietHours?.quietHoursEnd} ${quietHours?.timezone || 'Asia/Kolkata'})`;
       }
     }
 
@@ -89,8 +86,23 @@ export class PreferenceEvaluator {
       deliverEmail,
       deliverPush,
       isHeldDueToQuietHours,
+      deferredUntil,
       reason,
     };
+  }
+
+  /**
+   * Computes the ISO timestamp when the current quiet-hours window concludes.
+   */
+  static computeQuietHoursEndTimestamp(settings: UserQuietHoursSettings, now: Date = new Date()): string {
+    const endStr = settings.quietHoursEnd || '07:00:00';
+    const [endH, endM] = endStr.split(':').map(Number);
+    const deferredDate = new Date(now);
+    deferredDate.setHours(endH, endM, 0, 0);
+    if (deferredDate.getTime() <= now.getTime()) {
+      deferredDate.setDate(deferredDate.getDate() + 1);
+    }
+    return deferredDate.toISOString();
   }
 
   /**

@@ -305,6 +305,81 @@ export function renderNotificationContent(params: RenderTemplateParams): Notific
       };
     }
 
+    // -------------------------------------------------------------------------
+    // Phase 9 Stage 3E: Regulatory Announcements & Cross-Stage Milestones
+    // -------------------------------------------------------------------------
+    case "material_regulatory_announcement": {
+      const companyName = escapeHtml(String(payload.companyName || "IPO"));
+      const symbol = escapeHtml(String(payload.symbol || ""));
+      const headline = escapeHtml(String(payload.headline || "Material Regulatory Notice"));
+      const slug = String(payload.slug || "");
+      const excerpt = escapeHtml(String(payload.excerpt || ""));
+
+      return {
+        title: `Regulatory Notice: ${companyName}${symbol ? ` (${symbol})` : ""}`,
+        message: `${headline}.\n\n${excerpt}`,
+        actionUrl: slug ? `/ipos/${slug}#news` : "/news",
+        actionLabel: "View Official Filing",
+        priority: "urgent",
+        category: "ipo_milestone",
+        isMandatory: false,
+        metadata: { slug, eventType, headline },
+      };
+    }
+
+    case "subscription_demand_milestone": {
+      const companyName = escapeHtml(String(payload.companyName || "IPO"));
+      const symbol = escapeHtml(String(payload.symbol || ""));
+      const multiple = Number(payload.multiple || 0);
+      const category = escapeHtml(String(payload.demandCategory || "Overall"));
+      const slug = String(payload.slug || "");
+
+      return {
+        title: `Demand Milestone: ${companyName} (${multiple}x Subscribed)`,
+        message: `${companyName}${symbol ? ` (${symbol})` : ""} has crossed ${multiple}x subscription in the ${category} category.`,
+        actionUrl: slug ? `/ipos/${slug}#subscription` : "/ipo-subscription",
+        actionLabel: "View Subscription Book",
+        priority: "high",
+        category: "ipo_milestone",
+        isMandatory: false,
+        metadata: { slug, multiple, eventType },
+      };
+    }
+
+    case "allotment_query_portal_active": {
+      const companyName = escapeHtml(String(payload.companyName || "IPO"));
+      const registrar = escapeHtml(String(payload.registrarName || "Registrar"));
+      const slug = String(payload.slug || "");
+
+      return {
+        title: `Allotment Query Active: ${companyName}`,
+        message: `${registrar} allotment inquiry endpoint is now live. Verify your allotment status via PAN / Application Number.`,
+        actionUrl: slug ? `/ipos/${slug}#allotment` : "/applications",
+        actionLabel: "Check Allotment Status",
+        priority: "urgent",
+        category: "allotment_refund",
+        isMandatory: false,
+        metadata: { slug, registrar, eventType },
+      };
+    }
+
+    case "regulatory_document_verified": {
+      const companyName = escapeHtml(String(payload.companyName || "IPO"));
+      const docType = escapeHtml(String(payload.documentType || "Statutory Document"));
+      const slug = String(payload.slug || "");
+
+      return {
+        title: `New Regulatory Filing: ${companyName} (${docType.toUpperCase()})`,
+        message: `An official ${docType.toUpperCase()} has been published and cryptographically verified for ${companyName}.`,
+        actionUrl: slug ? `/ipos/${slug}#documents` : "/ipos",
+        actionLabel: "View Document",
+        priority: "high",
+        category: "ipo_milestone",
+        isMandatory: false,
+        metadata: { slug, docType, eventType },
+      };
+    }
+
     // Default Fallback
     default: {
       const title = escapeHtml(String(payload.title || "Notification"));
