@@ -11,6 +11,7 @@ import { getApplicationDetailBundle } from "@/features/application/services/appl
 import { ApplicationTimeline } from "@/components/application/ApplicationTimeline";
 import { MandateStatusCard } from "@/components/application/MandateStatusCard";
 import { AllotmentCard } from "@/components/application/AllotmentCard";
+import { AllotmentVerificationCard } from "@/components/allotment/AllotmentVerificationCard";
 import { ApplicationEventsTable } from "@/components/application/ApplicationEventsTable";
 import { cancelApplicationAction } from "@/features/application/actions/applicationActions";
 import { ArrowLeft, Building2, User, Layers, Ban } from "lucide-react";
@@ -217,6 +218,17 @@ export default async function ApplicationDetailPage({ params }: ApplicationDetai
 
       {/* UPI Mandate Card */}
       <MandateStatusCard mandate={mandate} applicationAmount={application.application_amount} />
+
+      {/* Registrar Allotment Verification Gateway (Stage 4) */}
+      <AllotmentVerificationCard
+        applicationId={application.id}
+        companyName={ipo.company_name}
+        registrarName={ipo.registrar_name}
+        panMasked={applicant.pan_masked || "****"}
+        applicationNumber={application.application_number}
+        sharesApplied={application.total_quantity}
+        issuePrice={ipo.price_band_high || 100}
+      />
 
       {/* Registrar Allotment Card */}
       <AllotmentCard

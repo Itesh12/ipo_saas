@@ -288,7 +288,8 @@ export async function getApplicationDetailBundle(
         allotment_date,
         refund_date,
         listing_date,
-        listing_price
+        listing_price,
+        registrar_name
       ),
       ipo_application_bids (*),
       ipo_application_mandates (*),

@@ -64,6 +64,7 @@ export interface ApplicationDetailBundle {
     refund_date: string;
     listing_date: string;
     listing_price: number | null;
+    registrar_name?: string | null;
   };
   bids: IPOApplicationBidRow[];
   mandate: IPOApplicationMandateRow | null;
