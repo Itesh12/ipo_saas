@@ -76,11 +76,14 @@ export async function authenticateSyncRequest(req: NextRequest): Promise<AuthRes
 
   if (cronSecret && tokenToTest) {
     if (timingSafeEqualStrings(tokenToTest, cronSecret)) {
-      // Valid cron secret authenticated. User-Agent recorded strictly as telemetry.
+      // Valid cron secret authenticated. Distinguish scheduler actor from header/user-agent.
+      const customInitiatedBy = req.headers.get('x-initiated-by');
+      const actor = customInitiatedBy || (userAgent.toLowerCase().includes('github-actions') ? 'github_actions_cron' : 'vercel_cron');
+
       return {
         authorized: true,
         method: 'cron',
-        actor: 'vercel_cron',
+        actor,
         clientUserAgent: userAgent,
       };
     }
