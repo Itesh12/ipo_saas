@@ -77,13 +77,12 @@ export class AllotmentVerificationService {
           id,
           company_name,
           registrar_name,
-          issue_price,
-          max_price
+          price_band_high,
+          price_band_low
         ),
         applicant_profiles (
           id,
-          pan_masked,
-          pan_encrypted
+          pan_masked
         )
       `)
       .eq('id', applicationId)
@@ -109,8 +108,8 @@ export class AllotmentVerificationService {
         id: string;
         company_name: string;
         registrar_name: string | null;
-        issue_price: number | null;
-        max_price: number | null;
+        price_band_high: number | null;
+        price_band_low: number | null;
       } | null;
       applicant_profiles: {
         id: string;
@@ -308,8 +307,8 @@ export class AllotmentVerificationService {
           lotsAllotted: adapterRes.normalizedResult.lotsAllotted || 0,
           allotmentPrice:
             adapterRes.normalizedResult.allotmentPrice ||
-            app.ipos?.issue_price ||
-            app.ipos?.max_price ||
+            app.ipos?.price_band_high ||
+            app.ipos?.price_band_low ||
             app.bid_price,
           reportedRefundAmount: adapterRes.normalizedResult.reportedRefundAmount,
           sourceObservedAt: adapterRes.normalizedResult.sourceObservedAt,
@@ -322,8 +321,8 @@ export class AllotmentVerificationService {
           sharesAllotted: adapterRes.normalizedResult.sharesAllotted,
           allotmentPrice:
             adapterRes.normalizedResult.allotmentPrice ||
-            app.ipos?.issue_price ||
-            app.ipos?.max_price ||
+            app.ipos?.price_band_high ||
+            app.ipos?.price_band_low ||
             app.bid_price,
           actorId,
         });
@@ -375,8 +374,8 @@ export class AllotmentVerificationService {
           id,
           company_name,
           registrar_name,
-          issue_price,
-          max_price
+          price_band_high,
+          price_band_low
         ),
         applicant_profiles (
           id,
@@ -406,8 +405,8 @@ export class AllotmentVerificationService {
         id: string;
         company_name: string;
         registrar_name: string | null;
-        issue_price: number | null;
-        max_price: number | null;
+        price_band_high: number | null;
+        price_band_low: number | null;
       } | null;
       applicant_profiles: {
         id: string;
@@ -438,8 +437,8 @@ export class AllotmentVerificationService {
 
     const price =
       input.allotmentPrice ||
-      app.ipos?.issue_price ||
-      app.ipos?.max_price ||
+      app.ipos?.price_band_high ||
+      app.ipos?.price_band_low ||
       app.bid_price ||
       100;
 
