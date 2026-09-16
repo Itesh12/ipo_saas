@@ -121,6 +121,7 @@ export class IpoSyncService {
       const { ipoCanonicalPromotionService } = await import('./ipoCanonicalPromotionService');
       const draftRes = await ipoCanonicalPromotionService.batchPromoteCandidatesToDraft({
         allowPendingLotSize: true,
+        limit: 25,
       });
       draftPromotions = draftRes.promotedToDraft;
 

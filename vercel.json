@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/admin/ipo-sync/run?source=nse",
+      "schedule": "0 3-12 * * 1-5"
+    },
+    {
+      "path": "/api/admin/ipo-sync/run?source=sebi",
+      "schedule": "0 2,6,10,14 * * 1-5"
+    },
+    {
+      "path": "/api/admin/ipo-sync/run?source=all",
+      "schedule": "30 2,12 * * *"
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import React from 'react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { IpoCoverageReconciliationService } from '@/features/external-integrations/services/ipoCoverageReconciliationService';
+import { automationHealthService } from '@/features/external-integrations/services/automationHealthService';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -11,6 +12,8 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   History,
+  Clock,
+  Server,
 } from 'lucide-react';
 import { IngestionExtractionResult } from '@/features/external-integrations/ipo-master/ipoMasterTypes';
 
@@ -19,16 +22,13 @@ export const dynamic = 'force-dynamic';
 export default async function AdminIpoCoveragePage() {
   const admin = createAdminClient();
 
+  // 0. Fetch real-time automation health telemetry (Stage 3A.7)
+  const automationHealth = await automationHealthService.getAutomationHealth();
+
   // 1. Fetch live canonical IPOs
   const { data: canonicalIpos } = await admin
     .from('ipos')
     .select('id, company_name, symbol, status, category, market_segment, offering_year, price_band_low, price_band_high, open_date, close_date, exchange, lot_size, lot_size_status, publication_status, provenance')
-    .order('created_at', { ascending: false });
-
-  // 2. Fetch live inbox candidates
-  const { data: inboxCandidates } = await admin
-    .from('ipo_ingestion_inbox')
-    .select('id, canonical_name, symbol, review_status, has_conflict, conflict_details, market_segment')
     .order('created_at', { ascending: false });
 
   // 3. Fetch live observations
@@ -81,6 +81,107 @@ export default async function AdminIpoCoveragePage() {
         title="IPO Universe Coverage & Reconciliation"
         description="Authoritative source coverage accounting, multi-source provenance matrix, and zero-unexplained reconciliation audit."
       />
+
+      {/* Production Automation & Scheduler Heartbeat (Stage 3A.7) */}
+      <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden shadow-xs">
+        <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Server className="w-4 h-4 text-[var(--brand-primary)]" />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              Production Automation & Scheduler Heartbeat
+            </h2>
+            <span
+              className={`px-2.5 py-0.5 text-xs font-semibold rounded-full border ${
+                automationHealth.status === 'OPERATIONAL'
+                  ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
+                  : automationHealth.status === 'DELAYED'
+                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/30'
+                  : 'bg-rose-500/10 text-rose-500 border-rose-500/30'
+              }`}
+            >
+              {automationHealth.status === 'OPERATIONAL'
+                ? '🟢 ALL SCHEDULERS OPERATIONAL'
+                : automationHealth.status === 'DELAYED'
+                ? '⚠️ AUTOMATION DELAYED'
+                : '⚠️ FEEDS DEGRADED'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
+            <span>Last checked: {automationHealth.checkedAtIST}</span>
+            <span className="hidden sm:inline">•</span>
+            <span>24h Runs: <strong className="text-[var(--text-primary)]">{automationHealth.totalRunsLast24h}</strong></span>
+            <span className="hidden sm:inline">•</span>
+            <span>24h Published: <strong className="text-emerald-500">{automationHealth.totalPublishedLast24h}</strong></span>
+          </div>
+        </div>
+
+        {/* Delayed / Missed Run Warning Banner */}
+        {automationHealth.status === 'DELAYED' && (
+          <div className="p-3 bg-amber-500/10 border-b border-amber-500/30 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 font-medium">
+            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>{automationHealth.statusMessage}. Check Vercel Cron execution logs or trigger an immediate manual sync below.</span>
+          </div>
+        )}
+
+        {/* 3 Authoritative Scheduled Jobs Grid */}
+        <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(['nse', 'sebi', 'master'] as const).map((jobKey) => {
+            const job = automationHealth.jobs[jobKey];
+            const isHealthy = job.status === 'HEALTHY';
+            const isMissed = job.status === 'MISSED';
+            const isSkipped = job.status === 'SKIPPED_LOCK';
+
+            return (
+              <div
+                key={jobKey}
+                className="p-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] space-y-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-[var(--text-primary)]">{job.jobName}</h3>
+                    <p className="text-[10px] text-[var(--text-muted)]">{job.istDescription}</p>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-bold rounded-md uppercase tracking-wider ${
+                      isHealthy
+                        ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                        : isMissed
+                        ? 'bg-amber-500/15 text-amber-500 border border-amber-500/30'
+                        : isSkipped
+                        ? 'bg-blue-500/15 text-blue-500 border border-blue-500/30'
+                        : 'bg-rose-500/15 text-rose-500 border border-rose-500/30'
+                    }`}
+                  >
+                    {job.status}
+                  </span>
+                </div>
+
+                <div className="space-y-1 text-[11px] pt-1 border-t border-[var(--border-subtle)]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--text-muted)]">Last Sync:</span>
+                    <span className="font-mono text-[var(--text-secondary)]">{job.lastRunAtIST}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--text-muted)]">Next Expected:</span>
+                    <span className="font-mono text-[var(--text-primary)] font-medium">{job.nextScheduledRunAtIST}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--text-muted)]">Consecutive Failures:</span>
+                    <span className={job.consecutiveFailures > 0 ? 'text-rose-500 font-bold' : 'text-emerald-500'}>
+                      {job.consecutiveFailures}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-[var(--text-muted)] italic pt-1 border-t border-[var(--border-subtle)]">
+                  {job.statusMessage}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Global Coverage State Banner */}
       <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-start gap-3">

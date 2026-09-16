@@ -456,6 +456,7 @@ export class IpoCanonicalPromotionService {
   public async batchPromoteCandidatesToDraft(options?: {
     allowPendingLotSize?: boolean;
     adminUserId?: string | null;
+    limit?: number;
   }): Promise<{
     totalEvaluated: number;
     promotedToDraft: number;
@@ -463,11 +464,14 @@ export class IpoCanonicalPromotionService {
     results: PromotionExecutionResult[];
   }> {
     const admin = createAdminClient();
+    const batchLimit = options?.limit ?? 50;
+
     const { data: candidates, error } = await admin
       .from('ipo_ingestion_inbox')
       .select('id, canonical_name, review_status, has_conflict')
       .in('review_status', ['candidate', 'identity_resolved', 'pending', 'pending_review'])
-      .eq('has_conflict', false);
+      .eq('has_conflict', false)
+      .limit(batchLimit);
 
     if (error || !candidates) {
       return { totalEvaluated: 0, promotedToDraft: 0, skippedIneligible: 0, results: [] };
@@ -587,39 +591,50 @@ export class IpoCanonicalPromotionService {
       }
 
       if (isEligibleForPublish) {
-        const { error: updateError } = await admin
-          .from('ipos')
-          .update({
-            publication_status: 'published',
-            published_at: nowIso,
-            updated_at: nowIso,
-            approved_by: options?.adminUserId || null,
-          })
-          .eq('id', ipo.id);
-
-        if (!updateError) {
-          await admin
-            .from('ipo_ingestion_inbox')
-            .update({
-              review_status: 'promoted_to_published',
-              reviewed_at: nowIso,
-              reviewed_by: options?.adminUserId || null,
-            })
-            .eq('promoted_ipo_id', ipo.id);
-
-          publishedIpos.push({
-            id: ipo.id,
-            company_name: ipo.company_name,
-            slug: ipo.slug,
-            status: ipo.status,
-          });
-          publishedCount++;
-        } else {
-          skippedCount++;
-        }
+        publishedIpos.push({
+          id: ipo.id,
+          company_name: ipo.company_name,
+          slug: ipo.slug,
+          status: ipo.status,
+        });
       } else {
         skippedCount++;
       }
+    }
+
+    if (publishedIpos.length > 0) {
+      const eligibleIds = publishedIpos.map((p) => p.id);
+      
+      // Batch update canonical IPOs
+      const { error: iposUpdateErr } = await admin
+        .from('ipos')
+        .update({
+          publication_status: 'published',
+          published_at: nowIso,
+          updated_at: nowIso,
+          approved_by: options?.adminUserId || null,
+        })
+        .in('id', eligibleIds);
+
+      if (iposUpdateErr) {
+        console.error('[IpoCanonicalPromotionService] Batch publish update error:', iposUpdateErr.message);
+      }
+
+      // Batch update inbox items
+      const { error: inboxUpdateErr } = await admin
+        .from('ipo_ingestion_inbox')
+        .update({
+          review_status: 'promoted_to_published',
+          reviewed_at: nowIso,
+          reviewed_by: options?.adminUserId || null,
+        })
+        .in('promoted_ipo_id', eligibleIds);
+
+      if (inboxUpdateErr) {
+        console.warn('[IpoCanonicalPromotionService] Batch inbox update error:', inboxUpdateErr.message);
+      }
+
+      publishedCount = publishedIpos.length;
     }
 
     return {

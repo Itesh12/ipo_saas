@@ -14,7 +14,6 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { NseListingArchiveAdapter } from '../features/external-integrations/adapters/nseListingArchiveAdapter';
 import { SebiPublicIssuesExtractor } from '../features/external-integrations/adapters/sebiExtractor';
-import { HistoricalExchangeAdapter } from '../features/external-integrations/adapters/historicalExchangeAdapter';
 import { CanonicalIpoResolver } from '../features/external-integrations/services/canonicalIpoResolver';
 import { getPublishedIPOs, getIPOUniverseCounts } from '../features/ipo/services/ipoService';
 
@@ -161,9 +160,9 @@ describe('Phase 9 Stage 3A.6 — Complete Universe Acquisition Matrix', () => {
       };
 
       const outcome = CanonicalIpoResolver.resolveObservation(
-        {} as any,
-        {} as any,
-        incoming as any
+        {} as unknown as Parameters<typeof CanonicalIpoResolver.resolveObservation>[0],
+        {} as unknown as Parameters<typeof CanonicalIpoResolver.resolveObservation>[1],
+        incoming as unknown as Parameters<typeof CanonicalIpoResolver.resolveObservation>[2]
       );
       assert.equal(outcome.market_segment, 'NSE_SME');
       assert.equal(outcome.instrument_type, 'SME_IPO');
@@ -196,7 +195,7 @@ describe('Phase 9 Stage 3A.6 — Complete Universe Acquisition Matrix', () => {
       const mainboardRes = await getPublishedIPOs({ market_segment: 'MAINBOARD', pageSize: 10 });
       assert.ok(Array.isArray(mainboardRes.ipos));
       for (const ipo of mainboardRes.ipos) {
-        const seg = (ipo as unknown as Record<string, unknown>).market_segment || (ipo.category === 'sme' ? 'NSE_SME' : 'MAINBOARD');
+        const seg = (ipo as unknown as Record<string, unknown>).market_segment || (ipo.category === 'mainboard' ? 'MAINBOARD' : 'NSE_SME');
         assert.equal(seg, 'MAINBOARD');
       }
 

@@ -164,7 +164,7 @@ async function runCompleteUniverseAudit() {
 
   const { data: allCanonical, error: ipoError } = await supabase
     .from('ipos')
-    .select('id, company_name, symbol, status, category, market_segment, offering_year, instrument_type, issue_identity, publication_status')
+    .select('id, company_name, symbol, status, category, market_segment, offering_year, instrument_type, issue_identity, publication_status, listing_date')
     .eq('publication_status', 'published');
 
   if (ipoError || !allCanonical) {
