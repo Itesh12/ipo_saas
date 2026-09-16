@@ -161,8 +161,9 @@ export class HistoricalExchangeAdapter implements HistoricalIpoSourceContract {
    * Fetches and normalizes a real historical batch from official archives.
    */
   public async fetchArchiveBatch(
-    _batchIdOrYear?: string | number
+    batchIdOrYear?: string | number
   ): Promise<IngestionExtractionResult[]> {
+    void batchIdOrYear;
     const fetchResult = await this.sebiClient.fetchLiveFilings(
       HistoricalExchangeAdapter.OFFICIAL_HISTORICAL_PORTAL
     );

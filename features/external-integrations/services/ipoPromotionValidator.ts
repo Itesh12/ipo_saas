@@ -230,11 +230,9 @@ export class IpoPromotionValidator {
     }
 
     const rawLot = payload.lot_size;
-    let _lotSize: number | null = null;
     if (rawLot !== undefined && rawLot !== null && String(rawLot).trim() !== '') {
       const parsed = Number(rawLot);
       if (!isNaN(parsed) && Number.isInteger(parsed) && parsed > 0) {
-        _lotSize = parsed;
         passedFields.push('lot_size');
       } else {
         missingFields.push('lot_size');

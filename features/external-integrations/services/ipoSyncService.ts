@@ -519,7 +519,7 @@ export class IpoSyncService {
           } else {
             recordsIngested++;
           }
-        } catch (_itemErr) {
+        } catch {
           recordsFailed++;
         }
       }
