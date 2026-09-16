@@ -74,12 +74,11 @@ export async function postJournalEntry(
     };
   }
 
-  let supabase: any;
-  try {
+  let supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     const { createAdminClient } = await import("@/lib/supabase/admin");
     supabase = createAdminClient();
-  } catch {
-    supabase = await createClient();
   }
 
   // 2. Check Idempotency Key
