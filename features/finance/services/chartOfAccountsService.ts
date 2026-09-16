@@ -92,7 +92,13 @@ export const STANDARD_CHART_OF_ACCOUNTS: StandardAccountTemplate[] = [
  * Idempotently creates missing accounts.
  */
 export async function ensureUserChartOfAccounts(userId: string): Promise<FinancialAccountRow[]> {
-  const supabase = await createClient();
+  let supabase: any;
+  try {
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    supabase = createAdminClient();
+  } catch {
+    supabase = await createClient();
+  }
 
   // 1. Fetch existing accounts
   const { data: existing, error } = await supabase
