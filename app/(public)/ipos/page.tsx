@@ -14,6 +14,8 @@ interface PageProps {
     tab?: string;
     category?: string;
     status?: string;
+    segment?: string;
+    year?: string;
     q?: string;
     sort?: string;
   }>;
@@ -24,6 +26,8 @@ export default async function IposPage({ searchParams }: PageProps) {
   const activeTab = params.tab || "all";
   const category = (params.category as IPOCategory) || "all";
   const statusFilter = (params.status as IPOStatus) || "all";
+  const activeSegment = params.segment || "all";
+  const activeYear = params.year || "all";
   const searchQuery = params.q || "";
   const sortBy = (params.sort as "open_date" | "close_date" | "listing_date" | "issue_size" | "company_name") || "open_date";
 
@@ -38,18 +42,49 @@ export default async function IposPage({ searchParams }: PageProps) {
     getPublishedIPOs({
       category,
       status: effectiveStatus,
+      market_segment: activeSegment !== "all" ? (activeSegment as "MAINBOARD" | "NSE_SME" | "BSE_SME") : undefined,
+      year: activeYear !== "all" ? activeYear : undefined,
       searchQuery,
       sortBy,
     }),
     getIPOUniverseCounts(),
   ]);
 
+  const buildUrl = (updates: Record<string, string>) => {
+    const p = new URLSearchParams();
+    if (activeTab !== "all") p.set("tab", activeTab);
+    if (activeSegment !== "all") p.set("segment", activeSegment);
+    if (activeYear !== "all") p.set("year", activeYear);
+    if (searchQuery) p.set("q", searchQuery);
+    if (sortBy !== "open_date") p.set("sort", sortBy);
+    for (const [k, v] of Object.entries(updates)) {
+      if (v === "all") p.delete(k);
+      else p.set(k, v);
+    }
+    const q = p.toString();
+    return q ? `/ipos?${q}` : "/ipos";
+  };
+
   const tabItems = [
-    { id: "all", label: `All IPOs (${counts.all})`, icon: Layers, href: "/ipos" },
-    { id: "current", label: `Current (${counts.current})`, icon: Flame, href: "/ipos?tab=current" },
-    { id: "upcoming", label: `Upcoming (${counts.upcoming})`, icon: Calendar, href: "/ipos?tab=upcoming" },
-    { id: "announced", label: `Announced (${counts.announced})`, icon: FileText, href: "/ipos?tab=announced" },
-    { id: "past", label: `Past (${counts.past})`, icon: CheckCircle, href: "/ipos?tab=past" },
+    { id: "all", label: `All IPOs (${counts.all})`, icon: Layers, href: buildUrl({ tab: "all" }) },
+    { id: "current", label: `Current (${counts.current})`, icon: Flame, href: buildUrl({ tab: "current" }) },
+    { id: "upcoming", label: `Upcoming (${counts.upcoming})`, icon: Calendar, href: buildUrl({ tab: "upcoming" }) },
+    { id: "announced", label: `Announced (${counts.announced})`, icon: FileText, href: buildUrl({ tab: "announced" }) },
+    { id: "past", label: `Past (${counts.past})`, icon: CheckCircle, href: buildUrl({ tab: "past" }) },
+  ];
+
+  const segmentItems = [
+    { id: "all", label: `All Segments (${counts.all})` },
+    { id: "MAINBOARD", label: `Mainboard (${counts.mainboard})` },
+    { id: "NSE_SME", label: `NSE SME (${counts.nse_sme})` },
+    { id: "BSE_SME", label: `BSE SME (${counts.bse_sme})` },
+  ];
+
+  const yearItems = [
+    { id: "all", label: "All Years" },
+    { id: "2026", label: `2026 (${counts.byYear[2026] || 0})` },
+    { id: "2025", label: `2025 (${counts.byYear[2025] || 0})` },
+    { id: "2024", label: `2024 (${counts.byYear[2024] || 0})` },
   ];
 
   return (
@@ -60,7 +95,7 @@ export default async function IposPage({ searchParams }: PageProps) {
         description="Discover and research active, upcoming, and listed Mainboard and SME initial public offerings in the Indian equity markets."
       />
 
-      {/* Primary Tabs */}
+      {/* Primary Lifecycle Tabs */}
       <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] w-fit">
         {tabItems.map((tab) => {
           const Icon = tab.icon;
@@ -81,6 +116,53 @@ export default async function IposPage({ searchParams }: PageProps) {
             </Link>
           );
         })}
+      </div>
+
+      {/* Stage 3A.6: Market Segment & Year Filter Pill Bars */}
+      <div className="flex flex-wrap items-center justify-between gap-4 p-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs">
+        {/* Segment Filter */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[var(--text-muted)] font-medium mr-1">Segment:</span>
+          {segmentItems.map((seg) => {
+            const isActive = activeSegment === seg.id;
+            return (
+              <Link
+                key={seg.id}
+                href={buildUrl({ segment: seg.id })}
+                className={cn(
+                  "px-2.5 py-1 rounded-md transition-colors",
+                  isActive
+                    ? "bg-[var(--brand-primary)] text-white font-semibold"
+                    : "bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)]/70"
+                )}
+              >
+                {seg.label}
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Year Filter */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[var(--text-muted)] font-medium mr-1">Year:</span>
+          {yearItems.map((yr) => {
+            const isActive = activeYear === yr.id;
+            return (
+              <Link
+                key={yr.id}
+                href={buildUrl({ year: yr.id })}
+                className={cn(
+                  "px-2.5 py-1 rounded-md transition-colors",
+                  isActive
+                    ? "bg-[var(--text-primary)] text-[var(--bg-surface)] font-semibold"
+                    : "bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)]/70"
+                )}
+              >
+                {yr.label}
+              </Link>
+            );
+          })}
+        </div>
       </div>
 
       {/* Filter and Search Bar */}

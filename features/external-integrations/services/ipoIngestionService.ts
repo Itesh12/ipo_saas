@@ -175,6 +175,9 @@ export class IpoIngestionService {
         isin: extraction.normalized_payload.isin || null,
         review_status: initialStatus,
         has_conflict: false,
+        market_segment: extraction.normalized_payload.market_segment || (extraction.normalized_payload.instrument_type === 'SME_IPO' ? 'NSE_SME' : 'MAINBOARD'),
+        instrument_type: extraction.normalized_payload.instrument_type || 'IPO',
+        issue_identity: extraction.normalized_payload.issue_identity || null,
       })
       .select('id')
       .single();

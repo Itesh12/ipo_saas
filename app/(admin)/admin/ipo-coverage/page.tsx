@@ -22,23 +22,31 @@ export default async function AdminIpoCoveragePage() {
   // 1. Fetch live canonical IPOs
   const { data: canonicalIpos } = await admin
     .from('ipos')
-    .select('id, company_name, symbol, status, category, price_band_low, price_band_high, open_date, close_date, exchange, lot_size, lot_size_status, publication_status, provenance')
+    .select('id, company_name, symbol, status, category, market_segment, offering_year, price_band_low, price_band_high, open_date, close_date, exchange, lot_size, lot_size_status, publication_status, provenance')
     .order('created_at', { ascending: false });
 
   // 2. Fetch live inbox candidates
   const { data: inboxCandidates } = await admin
     .from('ipo_ingestion_inbox')
-    .select('id, canonical_name, symbol, review_status, has_conflict, conflict_details')
+    .select('id, canonical_name, symbol, review_status, has_conflict, conflict_details, market_segment')
     .order('created_at', { ascending: false });
 
   // 3. Fetch live observations
   const { data: observations } = await admin
     .from('ipo_ingestion_observations')
-    .select('id, source, document_type, normalized_payload, provenance, observed_at')
+    .select('id, source, document_type, normalized_payload, provenance, observed_at, market_segment')
     .order('observed_at', { ascending: false });
+
+  // 4. Fetch live page traversal audits
+  const { data: pageAudits } = await admin
+    .from('ipo_source_page_sync_audit')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(20);
 
   const obsList = observations || [];
   const iposList = canonicalIpos || [];
+  const pageAuditList = pageAudits || [];
 
   // Group observations by source
   const obsBySource: Record<string, Array<Record<string, unknown>>> = {};
@@ -228,6 +236,80 @@ export default async function AdminIpoCoveragePage() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Stage 3A.6: Source Page Traversal & Backfill Audit */}
+      <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
+        <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+            Source Page Traversal & Backfill Audit ({pageAuditList.length} Runs)
+          </h3>
+          <span className="text-xs text-[var(--text-muted)]">
+            Traverses all archive pages until source exhaustion (Zero Hidden Gaps)
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-[var(--bg-surface-elevated)] border-b border-[var(--border-subtle)] text-[var(--text-muted)] uppercase tracking-wider">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Source</th>
+                <th className="px-4 py-2 font-semibold">Segment</th>
+                <th className="px-4 py-2 font-semibold">Page Number</th>
+                <th className="px-4 py-2 font-semibold">Records Discovered</th>
+                <th className="px-4 py-2 font-semibold">Records Persisted</th>
+                <th className="px-4 py-2 font-semibold">Status</th>
+                <th className="px-4 py-2 font-semibold">Duration</th>
+                <th className="px-4 py-2 font-semibold">Date Range / Details</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-subtle)]">
+              {pageAuditList.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    No backfill page sync runs logged yet. Execute backfill service to record live runs.
+                  </td>
+                </tr>
+              ) : (
+                pageAuditList.map((audit) => (
+                  <tr key={audit.id} className="hover:bg-[var(--bg-surface-elevated)] transition-colors">
+                    <td className="px-4 py-2.5 font-bold uppercase text-[var(--brand-primary)]">
+                      {audit.source}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                        {audit.segment}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono">Page {audit.page_number}</td>
+                    <td className="px-4 py-2.5 text-blue-600 dark:text-blue-400 font-semibold">
+                      {audit.records_discovered}
+                    </td>
+                    <td className="px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                      {audit.records_persisted}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          audit.status === 'success'
+                            ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                            : 'bg-red-500/10 text-red-500 border border-red-500/20'
+                        }`}
+                      >
+                        {audit.status.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-[var(--text-muted)]">{audit.duration_ms}ms</td>
+                    <td className="px-4 py-2.5 text-[var(--text-muted)]">
+                      {audit.sanitized_error || audit.date_range || 'Standard run'}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

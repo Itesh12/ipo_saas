@@ -17,6 +17,8 @@ export type SourceAuthorityTier =
 
 export type IngestionSource = 'sebi' | 'nse' | 'bse' | 'upstox' | 'nse_archive' | 'bse_archive' | 'sebi_archive';
 
+export type MarketSegment = 'MAINBOARD' | 'NSE_SME' | 'BSE_SME';
+
 export type IPODataQuality = 'discovered' | 'partial' | 'verified' | 'complete' | 'conflicted';
 
 export type IPOInstrumentType =
@@ -166,10 +168,43 @@ export interface NormalizedIpoMasterPayload {
   lead_managers?: string[];
   business_status?: IPOStatus | null;
   issue_identity?: string | null;
+  market_segment?: MarketSegment | null;
   instrument_type?: IPOInstrumentType | null;
   data_quality?: IPODataQuality | null;
   offering_year?: number | null;
   amendment_urls?: string[];
+}
+
+export interface SourcePageAuditRecord {
+  id?: string;
+  source: IngestionSource | string;
+  segment: MarketSegment | string;
+  date_range?: string;
+  page_number: number;
+  status: 'success' | 'failed' | 'empty';
+  records_discovered: number;
+  records_persisted: number;
+  sanitized_error?: string | null;
+  duration_ms: number;
+  created_at?: string;
+}
+
+export interface ArchiveCoverageMetrics {
+  source: string;
+  segment: MarketSegment | string;
+  date_range: string;
+  pages_expected: number;
+  pages_discovered: number;
+  pages_fetched: number;
+  pages_failed: number;
+  records_discovered: number;
+  records_parsed: number;
+  records_persisted: number;
+  last_page_reached: boolean;
+  coverage_complete: boolean;
+  official_count?: number;
+  canonical_count?: number;
+  variance?: number;
 }
 
 export type IpoProvenanceMap = {

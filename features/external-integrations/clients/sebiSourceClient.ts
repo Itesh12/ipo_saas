@@ -101,6 +101,153 @@ export class SebiSourceClient {
     };
   }
 
+  private cachedSessionCookie: string | null = null;
+  private sessionCookieExpiry = 0;
+
+  /**
+   * Acquires or reuses a valid session cookie for SEBI AJAX pagination.
+   */
+  public async getSessionCookie(smid: number = 10): Promise<string> {
+    const now = Date.now();
+    if (this.cachedSessionCookie && now < this.sessionCookieExpiry) {
+      return this.cachedSessionCookie;
+    }
+
+    const initialUrl = `https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=3&smid=${smid}&ssid=15`;
+    const response = await fetch(initialUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(SebiSourceClient.TIMEOUT_MS),
+    });
+
+    const setCookie = response.headers.get('set-cookie') || '';
+    const cookiePart = setCookie.split(';')[0];
+    this.cachedSessionCookie = cookiePart;
+    this.sessionCookieExpiry = now + 10 * 60 * 1000; // 10 minutes cache
+    return this.cachedSessionCookie;
+  }
+
+  /**
+   * Fetches a specific page of filings using official SEBI AJAX endpoint.
+   * Traverses DRHP (smid=10), RHP (smid=11), and ROC Prospectus (smid=12).
+   */
+  public async fetchPaginatedFilings(
+    smid: number,
+    pageNumber: number,
+    options?: {
+      fromDate?: string;
+      toDate?: string;
+      fromYear?: string;
+      toYear?: string;
+      search?: string;
+    }
+  ): Promise<{
+    html: string;
+    status: number;
+    fetchedAt: string;
+    responseHash: string;
+    byteLength: number;
+    pageNumber: number;
+    totalRecordsDiscovered: number;
+    totalPagesDiscovered: number;
+    hasNextPage: boolean;
+  }> {
+    const fetchedAt = new Date().toISOString();
+    const referer = `https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=3&smid=${smid}&ssid=15`;
+
+    let html = '';
+    let status = 200;
+
+    if (pageNumber === 1 && !options?.fromDate && !options?.fromYear) {
+      // First page can be fetched directly via HomeAction.do
+      const res = await this.fetchLiveFilings(referer);
+      html = res.html;
+      status = res.status;
+    } else {
+      const cookie = await this.getSessionCookie(smid);
+      const postBody = new URLSearchParams({
+        nextValue: '1',
+        next: 'n',
+        search: options?.search || '',
+        fromDate: options?.fromDate || '',
+        toDate: options?.toDate || '',
+        fromYear: options?.fromYear || '',
+        toYear: options?.toYear || '',
+        deptId: '',
+        sid: '3',
+        ssid: '15',
+        smid: String(smid),
+        ssidhidden: '15',
+        intmid: '-1',
+        sText: 'Filings',
+        ssText: '',
+        smText: '',
+        doDirect: String(pageNumber),
+      }).toString();
+
+      let response: Response;
+      try {
+        response = await fetch('https://www.sebi.gov.in/sebiweb/ajax/home/getnewslistinfo.jsp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            'Referer': referer,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Cookie': cookie,
+          },
+          body: postBody,
+          signal: AbortSignal.timeout(SebiSourceClient.TIMEOUT_MS),
+        });
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        throw new SebiClientError(`SEBI paginated acquisition failed on page ${pageNumber}: ${errorMsg}`, 'SEBI_NETWORK_ERROR');
+      }
+
+      if (!response.ok) {
+        throw new SebiClientError(
+          `SEBI pagination returned status: ${response.status} on page ${pageNumber}`,
+          'SEBI_HTTP_ERROR',
+          response.status
+        );
+      }
+
+      html = await response.text();
+      status = response.status;
+    }
+
+    const byteLength = Buffer.byteLength(html, 'utf-8');
+    const responseHash = crypto.createHash('sha256').update(html).digest('hex');
+
+    // Parse record counter: e.g. "1 to 25 of 2202 records"
+    let totalRecordsDiscovered = 0;
+    let totalPagesDiscovered = 1;
+    const countMatch = html.match(/(\d+)\s+to\s+(\d+)\s+of\s+(\d+)\s+records/i);
+    if (countMatch) {
+      totalRecordsDiscovered = parseInt(countMatch[3], 10);
+      totalPagesDiscovered = Math.ceil(totalRecordsDiscovered / 25);
+    }
+
+    const hasNextPage = pageNumber < totalPagesDiscovered;
+
+    return {
+      html,
+      status,
+      fetchedAt,
+      responseHash,
+      byteLength,
+      pageNumber,
+      totalRecordsDiscovered,
+      totalPagesDiscovered,
+      hasNextPage,
+    };
+  }
+
   /**
    * SSRF Protection: Ensures URL strictly belongs to approved SEBI domain.
    */

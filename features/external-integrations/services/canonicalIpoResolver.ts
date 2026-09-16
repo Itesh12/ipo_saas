@@ -22,6 +22,7 @@ import {
   IPOInstrumentType,
   IPODataQuality,
   FieldTruthTable,
+  MarketSegment,
 } from '../ipo-master/ipoMasterTypes';
 import { deriveExplainableIPOStatus, LifecycleDerivationResult } from '@/features/ipo/services/ipoLifecycle';
 
@@ -31,6 +32,7 @@ export interface ResolutionOutcome {
   isin: string | null;
   issue_identity: string | null;
   instrument_type: IPOInstrumentType;
+  market_segment: MarketSegment;
   data_quality: IPODataQuality;
   has_conflict: boolean;
   conflict_details: IngestionConflictDetail[];
@@ -279,12 +281,17 @@ export class CanonicalIpoResolver {
       source_health: 'healthy',
     };
 
+    const marketSegment: MarketSegment =
+      resolved.market_segment || (instrumentType === 'SME_IPO' ? 'NSE_SME' : 'MAINBOARD');
+    resolved.market_segment = marketSegment;
+
     return {
       canonical_name: resolved.company_name,
       symbol: resolved.symbol || null,
       isin: resolved.isin || null,
       issue_identity: issueIdentity,
       instrument_type: instrumentType,
+      market_segment: marketSegment,
       data_quality: dataQuality,
       has_conflict: conflicts.length > 0,
       conflict_details: conflicts,

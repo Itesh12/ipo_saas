@@ -88,6 +88,7 @@ export class SebiPublicIssuesExtractor {
       company_name: cleanedName,
       lead_managers: row.leadManager ? [row.leadManager.trim()] : undefined,
       instrument_type: instrumentType,
+      market_segment: instrumentType === 'SME_IPO' ? 'NSE_SME' : 'MAINBOARD',
       data_quality: dataQuality,
       issue_identity: issueIdentity,
       offering_year: offeringYear,

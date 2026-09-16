@@ -61,26 +61,62 @@ export class HistoricalExchangeAdapter implements HistoricalIpoSourceContract {
   }
 
   /**
-   * Fetches and normalizes a real historical batch from official archives.
+   * Fetches and normalizes multiple pages of historical prospectuses from SEBI ROC archives.
    */
-  public async fetchArchiveBatch(
-    _batchIdOrYear?: string | number
-  ): Promise<IngestionExtractionResult[]> {
-    const fetchResult = await this.sebiClient.fetchLiveFilings(
-      HistoricalExchangeAdapter.OFFICIAL_HISTORICAL_PORTAL
-    );
+  public async fetchArchivePages(
+    maxPages: number = 5,
+    options?: {
+      fromYear?: string;
+      toYear?: string;
+      fromDate?: string;
+      toDate?: string;
+    }
+  ): Promise<{
+    results: IngestionExtractionResult[];
+    pagesFetched: number;
+    totalPagesDiscovered: number;
+    totalRecordsDiscovered: number;
+  }> {
+    const allResults: IngestionExtractionResult[] = [];
+    let totalRecordsDiscovered = 0;
+    let totalPagesDiscovered = 1;
+    let pagesFetched = 0;
 
-    const rawExtractions = SebiPublicIssuesExtractor.parseHtml(fetchResult.html);
+    for (let page = 1; page <= maxPages; page++) {
+      try {
+        const paginated = await this.sebiClient.fetchPaginatedFilings(12, page, options);
+        pagesFetched++;
+        totalRecordsDiscovered = paginated.totalRecordsDiscovered;
+        totalPagesDiscovered = paginated.totalPagesDiscovered;
 
-    // Normalize and attribute as official historical archival records
+        const rawExtractions = SebiPublicIssuesExtractor.parseHtml(paginated.html);
+        const normalizedBatch = this.normalizeBatch(rawExtractions);
+        allResults.push(...normalizedBatch);
+
+        if (!paginated.hasNextPage) break;
+      } catch (err: unknown) {
+        if (page === 1) throw err;
+        break; // Stop at last available page
+      }
+    }
+
+    return {
+      results: allResults,
+      pagesFetched,
+      totalPagesDiscovered,
+      totalRecordsDiscovered,
+    };
+  }
+
+  private normalizeBatch(rawExtractions: IngestionExtractionResult[]): IngestionExtractionResult[] {
     return rawExtractions.map((ext) => {
       const normalized = { ...ext.normalized_payload };
       
-      // Historical final offer documents indicate a listed / completed offering
       normalized.business_status = 'listed';
       normalized.instrument_type = ext.normalized_payload.instrument_type || 'IPO';
+      normalized.market_segment =
+        normalized.instrument_type === 'SME_IPO' ? 'NSE_SME' : 'MAINBOARD';
       
-      // Determine honest data quality based on available fields (Hard Gate 4)
       if (normalized.price_band_high && normalized.listing_date && normalized.lot_size) {
         normalized.data_quality = 'complete';
       } else if (normalized.prospectus_url || normalized.rhp_url) {
@@ -89,7 +125,6 @@ export class HistoricalExchangeAdapter implements HistoricalIpoSourceContract {
         normalized.data_quality = 'partial';
       }
 
-      // Generate dedicated historical issue identity
       const cleanSlug = normalized.company_name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
@@ -120,5 +155,19 @@ export class HistoricalExchangeAdapter implements HistoricalIpoSourceContract {
         provenance,
       };
     });
+  }
+
+  /**
+   * Fetches and normalizes a real historical batch from official archives.
+   */
+  public async fetchArchiveBatch(
+    _batchIdOrYear?: string | number
+  ): Promise<IngestionExtractionResult[]> {
+    const fetchResult = await this.sebiClient.fetchLiveFilings(
+      HistoricalExchangeAdapter.OFFICIAL_HISTORICAL_PORTAL
+    );
+
+    const rawExtractions = SebiPublicIssuesExtractor.parseHtml(fetchResult.html);
+    return this.normalizeBatch(rawExtractions);
   }
 }

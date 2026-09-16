@@ -59,6 +59,8 @@ export class NseIngestionAdapter {
       isin: raw.isin ? raw.isin.toUpperCase().trim() : null,
       exchange: 'NSE',
       instrument_type: instrumentType,
+      market_segment: instrumentType === 'SME_IPO' ? 'NSE_SME' : 'MAINBOARD',
+      category: instrumentType === 'SME_IPO' ? 'sme' : 'mainboard',
       data_quality: dataQuality,
       issue_identity: issueIdentity,
       offering_year: year,
