@@ -2,6 +2,7 @@ import React from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SystemTelemetryWidget } from "@/features/admin/components/intelligence/SystemTelemetryWidget";
 import { FinanceIntegrityWidget } from "@/features/admin/components/intelligence/FinanceIntegrityWidget";
+import { UnifiedStage5TelemetryWidget } from "@/features/admin/components/intelligence/UnifiedStage5TelemetryWidget";
 import { AdminIntelligenceService } from "@/features/admin/services/adminIntelligenceService";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DeadLetterManager } from "./DeadLetterManager";
@@ -45,6 +46,9 @@ export default async function AdminSystemHealthPage() {
           </span>
         }
       />
+
+      {/* Unified Stages 3A–5 Telemetry & Portfolio Reconciliation */}
+      <UnifiedStage5TelemetryWidget />
 
       {/* Main Telemetry Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -6,6 +6,20 @@
  */
 
 import { ApplicationDomainEvent } from './applicationLifecycle';
+import { AllotmentVerifiedEvent } from '../types/domainEventTypes';
+
+export async function dispatchAllotmentVerifiedEvent(event: AllotmentVerifiedEvent): Promise<void> {
+  if (process.env.NODE_ENV !== "test") {
+    console.info(`[DomainEvent][allotment_verified] App: ${event.payload.applicationId} Allotment: ${event.payload.allotmentId}`);
+  }
+
+  try {
+    const { InvestmentService } = await import('@/features/finance/services/investmentService');
+    await InvestmentService.processAllotmentVerifiedFinancialEvent(event);
+  } catch (err) {
+    console.error(`[dispatchAllotmentVerifiedEvent] Failed to dispatch verified allotment event:`, err);
+  }
+}
 
 export async function dispatchApplicationDomainEvent(event: ApplicationDomainEvent): Promise<void> {
   if (process.env.NODE_ENV !== "test") {
