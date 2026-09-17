@@ -13,6 +13,7 @@ import { MandateStatusCard } from "@/components/application/MandateStatusCard";
 import { AllotmentCard } from "@/components/application/AllotmentCard";
 import { AllotmentVerificationCard } from "@/components/allotment/AllotmentVerificationCard";
 import { ApplicationEventsTable } from "@/components/application/ApplicationEventsTable";
+import { ModifyBidsModal } from "@/components/application/ModifyBidsModal";
 import { cancelApplicationAction } from "@/features/application/actions/applicationActions";
 import { ArrowLeft, Building2, User, Layers, Ban } from "lucide-react";
 
@@ -56,16 +57,31 @@ export default async function ApplicationDetailPage({ params }: ApplicationDetai
         </Link>
 
         {isCancellable && (
-          <form action={handleCancel}>
-            <Button
-              type="submit"
-              size="sm"
-              variant="danger"
-              leftIcon={<Ban className="w-3.5 h-3.5" />}
-            >
-              Withdraw Application
-            </Button>
-          </form>
+          <div className="flex items-center gap-3">
+            <ModifyBidsModal
+              applicationId={application.id}
+              ipo={{
+                company_name: ipo.company_name,
+                lot_size: ipo.lot_size,
+                price_band_low: ipo.price_band_low,
+                price_band_high: ipo.price_band_high,
+              }}
+              category={application.investor_category}
+              initialBids={bids}
+              currentAmount={application.application_amount}
+            />
+
+            <form action={handleCancel}>
+              <Button
+                type="submit"
+                size="sm"
+                variant="danger"
+                leftIcon={<Ban className="w-3.5 h-3.5" />}
+              >
+                Withdraw Application
+              </Button>
+            </form>
+          </div>
         )}
       </div>
 

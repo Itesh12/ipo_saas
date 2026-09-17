@@ -11,6 +11,10 @@ import {
   BidInput,
 } from "./applicationRules";
 import {
+  calculateAndValidateBids,
+  EvaluatedBid,
+} from "./lotSizeCalculator";
+import {
   ApplicationStatus,
   isValidApplicationTransition,
 } from "./applicationLifecycle";
@@ -132,36 +136,31 @@ export async function createApplication(
     };
   }
 
-  // 4. Evaluate bids
-  const bidInputs: BidInput[] = bids.map((b) => ({
+  // 4. Evaluate bids with strict server authority
+  const bidInputs = bids.map((b) => ({
     bidNumber: b.bid_number,
     lotCount: b.lot_count,
     price: b.price,
     isCutoff: b.is_cutoff,
   }));
 
-  const bidEval = evaluateBids(
+  const calcResult = calculateAndValidateBids(
+    {
+      lotSize: ipo.lot_size,
+      priceBandLow: ipo.price_band_low,
+      priceBandHigh: ipo.price_band_high,
+    },
     bidInputs,
-    ipo.lot_size,
-    ipo.price_band_low,
-    ipo.price_band_high,
     investor_category
   );
 
-  if (!bidEval.success || !bidEval.calculatedBids) {
-    return { success: false, error: bidEval.error || "Bid calculation failed." };
+  if (!calcResult.isValid || calcResult.bids.length === 0) {
+    return { success: false, error: calcResult.validationError || "Bid calculation failed." };
   }
 
-  // 5. Compute aggregates (SEBI max bid rule)
-  const aggEval = computeApplicationAggregates(bidEval.calculatedBids, investor_category);
-  if (!aggEval.success || !aggEval.aggregates) {
-    return { success: false, error: aggEval.error || "Application aggregate calculation failed." };
-  }
-
-  const aggregates = aggEval.aggregates;
   const applicationNumber = generateApplicationNumber();
 
-  // 6. Insert Application record
+  // 5. Insert Application record
   const appInsertPayload: IPOApplicationInsert = {
     user_id: userId,
     ipo_id,
@@ -170,12 +169,12 @@ export async function createApplication(
     investor_category,
     status: "applied",
     applied_at: new Date().toISOString(),
-    total_lots: aggregates.totalLots,
-    total_quantity: aggregates.totalQuantity,
-    bid_price: aggregates.bidPrice,
-    is_cutoff: aggregates.isCutoff,
-    application_amount: aggregates.applicationAmount,
-    mandate_amount: aggregates.applicationAmount,
+    total_lots: calcResult.totalLots,
+    total_quantity: calcResult.totalQuantity,
+    bid_price: calcResult.bidPrice,
+    is_cutoff: calcResult.isCutoff,
+    application_amount: calcResult.applicationAmount,
+    mandate_amount: calcResult.applicationAmount,
     blocked_amount: 0,
     allotment_amount: 0,
     refund_amount: 0,
@@ -195,8 +194,8 @@ export async function createApplication(
 
   const appRecord = createdApp as unknown as IPOApplicationRow;
 
-  // 7. Insert Child Bids
-  const bidsInsertPayload: IPOApplicationBidInsert[] = bidEval.calculatedBids.map((b) => ({
+  // 6. Insert Child Bids
+  const bidsInsertPayload: IPOApplicationBidInsert[] = calcResult.bids.map((b) => ({
     application_id: appRecord.id,
     bid_number: b.bidNumber,
     lot_count: b.lotCount,
@@ -208,7 +207,7 @@ export async function createApplication(
 
   await supabase.from("ipo_application_bids").insert(bidsInsertPayload as never);
 
-  // 8. Insert Mandate Record
+  // 7. Insert Mandate Record
   const mandateUpi = upi_id ? maskUPI(upi_id) : applicant.upi_id_masked;
   const mandateInsertPayload: IPOApplicationMandateInsert = {
     application_id: appRecord.id,
@@ -216,30 +215,32 @@ export async function createApplication(
     provider_reference: null,
     upi_id_masked: mandateUpi,
     mandate_status: "created",
-    requested_amount: aggregates.applicationAmount,
+    requested_amount: calcResult.applicationAmount,
     blocked_amount: 0,
   };
 
   await supabase.from("ipo_application_mandates").insert(mandateInsertPayload as never);
 
-  // 9. Insert Immutable Event Record
+  // 8. Insert Immutable Event Record
   const eventInsertPayload: IPOApplicationEventInsert = {
     application_id: appRecord.id,
     event_type: "application_created",
-    description: `Application ${applicationNumber} submitted for ${ipo.company_name} (${aggregates.totalLots} lots, ₹${aggregates.applicationAmount.toLocaleString("en-IN")}).`,
+    description: `Application ${applicationNumber} submitted for ${ipo.company_name} (${calcResult.totalLots} lots, ₹${calcResult.applicationAmount.toLocaleString("en-IN")}).`,
     actor_id: userId,
     metadata: {
       category: investor_category,
-      lots: aggregates.totalLots,
-      quantity: aggregates.totalQuantity,
-      amount: aggregates.applicationAmount,
-      bidsCount: bidEval.calculatedBids.length,
-    },
+      lots: calcResult.totalLots,
+      quantity: calcResult.totalQuantity,
+      amount: calcResult.applicationAmount,
+      bidsCount: calcResult.bids.length,
+      activeBidNumber: calcResult.activeBidNumber,
+      bids: calcResult.bids,
+    } as never,
   };
 
   await supabase.from("ipo_application_events").insert(eventInsertPayload as never);
 
-  // 10. Dispatch Domain Event
+  // 9. Dispatch Domain Event
   dispatchApplicationDomainEvent({
     eventId: `evt-${Date.now()}`,
     applicationId: appRecord.id,
@@ -251,7 +252,7 @@ export async function createApplication(
       ipoId: ipo_id,
       applicantId: applicant_id,
       category: investor_category,
-      amount: aggregates.applicationAmount,
+      amount: calcResult.applicationAmount,
     },
   });
 
@@ -562,6 +563,210 @@ export async function cancelApplication(
     actorId: userId,
     description: reason ? `Application cancelled by user: ${reason}` : "Application cancelled by user.",
     metadata: { reason },
+  });
+}
+
+/**
+ * Modifies bids for an active application during the open bidding window.
+ * Re-validates against canonical IPO terms and SEBI category rules.
+ */
+export async function modifyApplicationBids(params: {
+  userId: string;
+  applicationId: string;
+  bids: Array<{
+    bid_number: number;
+    lot_count: number;
+    price: number;
+    is_cutoff: boolean;
+  }>;
+  reason?: string;
+}): Promise<{ success: boolean; data?: IPOApplicationRow; error?: string }> {
+  const { userId, applicationId, bids, reason } = params;
+  const supabase = await createClient();
+
+  // 1. Fetch current application & verify ownership
+  const { data: rawApp, error: appErr } = await supabase
+    .from("ipo_applications")
+    .select("*, ipos (id, lot_size, price_band_low, price_band_high, status, publication_status)")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .single();
+
+  if (appErr || !rawApp) {
+    return { success: false, error: "Application not found or unauthorized." };
+  }
+
+  const app = rawApp as unknown as IPOApplicationRow & {
+    ipos: {
+      id: string;
+      lot_size: number;
+      price_band_low: number;
+      price_band_high: number;
+      status: string;
+      publication_status: string;
+    };
+  };
+
+  // 2. Lifecycle guard: Modification only allowed in pre-allotment active stages
+  const modifiableStatuses = ["draft", "applied", "mandate_pending", "mandate_approved"];
+  if (!modifiableStatuses.includes(app.status)) {
+    return {
+      success: false,
+      error: `Applications in '${app.status}' state cannot be modified.`,
+    };
+  }
+
+  // 3. Recalculate with strict server authority
+  const calcResult = calculateAndValidateBids(
+    {
+      lotSize: app.ipos.lot_size,
+      priceBandLow: app.ipos.price_band_low,
+      priceBandHigh: app.ipos.price_band_high,
+    },
+    bids.map((b) => ({
+      bidNumber: b.bid_number,
+      lotCount: b.lot_count,
+      price: b.price,
+      isCutoff: b.is_cutoff,
+    })),
+    app.investor_category
+  );
+
+  if (!calcResult.isValid || calcResult.bids.length === 0) {
+    return { success: false, error: calcResult.validationError || "Bid modification failed validation." };
+  }
+
+  // 4. Fetch previous bids for audit trail
+  const { data: prevBids } = await supabase
+    .from("ipo_application_bids")
+    .select("*")
+    .eq("application_id", applicationId)
+    .order("bid_number", { ascending: true });
+
+  // 5. Replace child bids
+  await supabase
+    .from("ipo_application_bids")
+    .delete()
+    .eq("application_id", applicationId);
+
+  const bidsInsertPayload: IPOApplicationBidInsert[] = calcResult.bids.map((b) => ({
+    application_id: applicationId,
+    bid_number: b.bidNumber,
+    lot_count: b.lotCount,
+    quantity: b.quantity,
+    price: b.price,
+    is_cutoff: b.isCutoff,
+    amount: b.amount,
+  }));
+
+  await supabase.from("ipo_application_bids").insert(bidsInsertPayload as never);
+
+  // 6. Update parent application totals
+  const { data: updatedApp, error: updateErr } = await supabase
+    .from("ipo_applications")
+    .update({
+      total_lots: calcResult.totalLots,
+      total_quantity: calcResult.totalQuantity,
+      bid_price: calcResult.bidPrice,
+      is_cutoff: calcResult.isCutoff,
+      application_amount: calcResult.applicationAmount,
+      mandate_amount: calcResult.applicationAmount,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", applicationId)
+    .select()
+    .single();
+
+  if (updateErr || !updatedApp) {
+    return { success: false, error: `Failed to update application totals: ${updateErr?.message}` };
+  }
+
+  // 7. Update mandate amount if mandate exists
+  await supabase
+    .from("ipo_application_mandates")
+    .update({
+      requested_amount: calcResult.applicationAmount,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("application_id", applicationId);
+
+  // 8. Record audit event
+  await supabase.from("ipo_application_events").insert({
+    application_id: applicationId,
+    event_type: "bid_updated",
+    description: `Bids modified. Active amount updated from ₹${app.application_amount.toLocaleString("en-IN")} to ₹${calcResult.applicationAmount.toLocaleString("en-IN")}.${reason ? ` Reason: ${reason}` : ""}`,
+    actor_id: userId,
+    metadata: {
+      action: "modify_bids",
+      reason,
+      previousAmount: app.application_amount,
+      newAmount: calcResult.applicationAmount,
+      previousBids: prevBids,
+      newBids: calcResult.bids,
+      activeBidNumber: calcResult.activeBidNumber,
+    },
+  } as never);
+
+  // 9. Dispatch domain event
+  dispatchApplicationDomainEvent({
+    eventId: `evt-${Date.now()}`,
+    applicationId,
+    eventType: "bid_updated",
+    timestamp: new Date().toISOString(),
+    actorId: userId,
+    payload: {
+      applicationNumber: app.application_number,
+      previousAmount: app.application_amount,
+      newAmount: calcResult.applicationAmount,
+      bids: calcResult.bids,
+    },
+  });
+
+  return { success: true, data: updatedApp as unknown as IPOApplicationRow };
+}
+
+/**
+ * Withdraws an active application prior to bidding closure.
+ */
+export async function withdrawApplication(
+  applicationId: string,
+  userId: string,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+
+  const { data: rawApp, error } = await supabase
+    .from("ipo_applications")
+    .select("id, user_id, status, application_number")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .single();
+
+  const app = rawApp as unknown as {
+    id: string;
+    user_id: string;
+    status: ApplicationStatus;
+    application_number: string;
+  } | null;
+
+  if (error || !app) {
+    return { success: false, error: "Application not found or unauthorized." };
+  }
+
+  const withdrawableStatuses: ApplicationStatus[] = ["draft", "applied", "mandate_pending", "mandate_approved", "funds_blocked"];
+  if (!withdrawableStatuses.includes(app.status)) {
+    return {
+      success: false,
+      error: `Applications in '${app.status}' status cannot be withdrawn.`,
+    };
+  }
+
+  return transitionApplicationStatus({
+    applicationId,
+    nextStatus: "cancelled",
+    actorId: userId,
+    description: reason ? `Application withdrawn by user: ${reason}` : "Application withdrawn by user prior to allotment.",
+    metadata: { withdrawn: true, reason, applicationNumber: app.application_number },
   });
 }
 

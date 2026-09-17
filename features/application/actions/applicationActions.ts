@@ -6,6 +6,8 @@ import { hasMinimumRole } from "@/lib/security/roles";
 import {
   createApplication,
   cancelApplication,
+  modifyApplicationBids,
+  withdrawApplication,
 } from "../services/applicationService";
 import { updateApplicationMandate } from "../services/mandateService";
 import {
@@ -46,6 +48,57 @@ export async function cancelApplicationAction(applicationId: string, reason?: st
   }
 
   const result = await cancelApplication(applicationId, user.id, reason);
+  if (result.success) {
+    revalidatePath("/applications");
+    revalidatePath(`/applications/${applicationId}`);
+    revalidatePath("/dashboard");
+  }
+  return result;
+}
+
+/**
+ * User modifies bids on an active application.
+ */
+export async function modifyApplicationBidsAction(payload: {
+  applicationId: string;
+  bids: Array<{
+    bid_number: number;
+    lot_count: number;
+    price: number;
+    is_cutoff: boolean;
+  }>;
+  reason?: string;
+}) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { success: false, error: "Authentication required to modify bids." };
+  }
+
+  const result = await modifyApplicationBids({
+    userId: user.id,
+    applicationId: payload.applicationId,
+    bids: payload.bids,
+    reason: payload.reason,
+  });
+
+  if (result.success) {
+    revalidatePath("/applications");
+    revalidatePath(`/applications/${payload.applicationId}`);
+    revalidatePath("/dashboard");
+  }
+  return result;
+}
+
+/**
+ * User withdraws an active application prior to bidding closure.
+ */
+export async function withdrawApplicationAction(applicationId: string, reason?: string) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { success: false, error: "Authentication required to withdraw application." };
+  }
+
+  const result = await withdrawApplication(applicationId, user.id, reason);
   if (result.success) {
     revalidatePath("/applications");
     revalidatePath(`/applications/${applicationId}`);

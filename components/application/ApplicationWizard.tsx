@@ -15,6 +15,10 @@ import {
   isCutoffAllowedForCategory,
 } from "@/config/investorCategories";
 import { evaluateBids, computeApplicationAggregates, BidInput } from "@/features/application/services/applicationRules";
+import {
+  calculateAndValidateBids,
+  getCategoryLotBounds,
+} from "@/features/application/services/lotSizeCalculator";
 import { submitApplicationAction } from "@/features/application/actions/applicationActions";
 import { ApplicantSummary } from "@/features/application/types/application.types";
 import { ArrowRight, ArrowLeft, CheckCircle2, ShieldCheck, Plus, Trash2, Building2 } from "lucide-react";
@@ -65,21 +69,48 @@ export function ApplicationWizard({
 
   const cutoffAllowed = isCutoffAllowedForCategory(selectedCategory, CURRENT_REGULATORY_RULES);
 
-  // Evaluate bids dynamically
-  const bidEval = selectedIpo
-    ? evaluateBids(
-        bids,
-        selectedIpo.lot_size,
-        selectedIpo.price_band_low,
-        selectedIpo.price_band_high,
+  // Evaluate bids dynamically using pure calculator engine
+  const calcSummary = selectedIpo
+    ? calculateAndValidateBids(
+        {
+          lotSize: selectedIpo.lot_size,
+          priceBandLow: selectedIpo.price_band_low,
+          priceBandHigh: selectedIpo.price_band_high,
+        },
+        bids.map((b) => ({
+          bidNumber: b.bidNumber,
+          lotCount: b.lotCount,
+          price: b.price,
+          isCutoff: b.isCutoff,
+        })),
         selectedCategory
       )
-    : { success: false, error: "No IPO selected." };
+    : null;
 
-  const aggregates =
-    bidEval.success && bidEval.calculatedBids
-      ? computeApplicationAggregates(bidEval.calculatedBids, selectedCategory)
-      : null;
+  const categoryBounds = selectedIpo
+    ? getCategoryLotBounds(
+        {
+          lotSize: selectedIpo.lot_size,
+          priceBandLow: selectedIpo.price_band_low,
+          priceBandHigh: selectedIpo.price_band_high,
+        },
+        selectedCategory
+      )
+    : null;
+
+  const aggregates = calcSummary?.isValid
+    ? {
+        success: true,
+        aggregates: {
+          totalLots: calcSummary.totalLots,
+          totalQuantity: calcSummary.totalQuantity,
+          bidPrice: calcSummary.bidPrice,
+          isCutoff: calcSummary.isCutoff,
+          applicationAmount: calcSummary.applicationAmount,
+          activeBidNumber: calcSummary.activeBidNumber,
+        },
+      }
+    : null;
 
   const handleAddBid = () => {
     if (bids.length < 3 && selectedIpo) {
