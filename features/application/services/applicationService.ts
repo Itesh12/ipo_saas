@@ -50,7 +50,8 @@ function generateApplicationNumber(): string {
  */
 export async function createApplication(
   userId: string,
-  formData: CreateApplicationFormData
+  formData: CreateApplicationFormData,
+  clientOverride?: any
 ): Promise<{ success: boolean; data?: IPOApplicationRow; error?: string }> {
   const validated = createApplicationSchema.safeParse(formData);
   if (!validated.success) {
@@ -61,7 +62,7 @@ export async function createApplication(
   }
 
   const { ipo_id, applicant_id, investor_category, bids, upi_id, notes } = validated.data;
-  const supabase = await createClient();
+  const supabase = clientOverride || (await createClient());
 
   // 1. Verify Applicant ownership
   const { data: rawApplicant, error: applicantError } = await supabase
@@ -473,9 +474,9 @@ export async function transitionApplicationStatus(params: {
   actorId?: string | null;
   description?: string;
   metadata?: Record<string, unknown>;
-}): Promise<{ success: boolean; error?: string }> {
+}, clientOverride?: any): Promise<{ success: boolean; error?: string }> {
   const { applicationId, nextStatus, actorId, description, metadata } = params;
-  const supabase = await createClient();
+  const supabase = clientOverride || (await createClient());
 
   const { data: rawCurrentApp, error: fetchErr } = await supabase
     .from("ipo_applications")
@@ -580,9 +581,9 @@ export async function modifyApplicationBids(params: {
     is_cutoff: boolean;
   }>;
   reason?: string;
-}): Promise<{ success: boolean; data?: IPOApplicationRow; error?: string }> {
+}, clientOverride?: any): Promise<{ success: boolean; data?: IPOApplicationRow; error?: string }> {
   const { userId, applicationId, bids, reason } = params;
-  const supabase = await createClient();
+  const supabase = clientOverride || (await createClient());
 
   // 1. Fetch current application & verify ownership
   const { data: rawApp, error: appErr } = await supabase
@@ -671,6 +672,7 @@ export async function modifyApplicationBids(params: {
       is_cutoff: calcResult.isCutoff,
       application_amount: calcResult.applicationAmount,
       mandate_amount: calcResult.applicationAmount,
+      version: ((app as any).version || 1) + 1,
       updated_at: new Date().toISOString(),
     } as never)
     .eq("id", applicationId)
@@ -731,9 +733,10 @@ export async function modifyApplicationBids(params: {
 export async function withdrawApplication(
   applicationId: string,
   userId: string,
-  reason?: string
+  reason?: string,
+  clientOverride?: any
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient();
+  const supabase = clientOverride || (await createClient());
 
   const { data: rawApp, error } = await supabase
     .from("ipo_applications")
@@ -767,7 +770,7 @@ export async function withdrawApplication(
     actorId: userId,
     description: reason ? `Application withdrawn by user: ${reason}` : "Application withdrawn by user prior to allotment.",
     metadata: { withdrawn: true, reason, applicationNumber: app.application_number },
-  });
+  }, clientOverride);
 }
 
 /**
