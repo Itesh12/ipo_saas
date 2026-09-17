@@ -2,10 +2,12 @@
  * features/allotment-verification/types/verificationTypes.ts
  *
  * Domain types for Phase 10 / Stage 4: Registrar Allotment Verification Gateway.
- * Strictly adheres to Revision 3 specification:
- * - Deterministic issue bindings
+ * Strictly adheres to Candidate B (Revision 3) specification:
+ * - Deterministic issue bindings & capability registry
  * - Zero raw PII retention (SHA-256 hashes + masked identifiers)
- * - Strict evidence classification and separation from Phase 5 financial mutation
+ * - Explicit financial dispatch state machine (BLOCKED -> ELIGIBLE -> EMITTED -> ACKNOWLEDGED)
+ * - True two-person dual-control challenge resolution
+ * - Durable Stage 4 outbox with immutable event audit trail
  */
 
 export type RegistrarVerificationMode =
@@ -49,6 +51,59 @@ export type VerificationResultType =
   | 'unknown';
 
 export type LookupType = 'pan' | 'application_no' | 'dp_client_id';
+
+/**
+ * Explicit Financial Dispatch Status (Revision 3)
+ * Replaces ambiguous 'DISPATCHED' with terminal 'ACKNOWLEDGED'
+ */
+export type FinancialDispatchStatus =
+  | 'BLOCKED'
+  | 'ELIGIBLE'
+  | 'EMITTED'
+  | 'ACKNOWLEDGED'
+  | 'NOT_APPLICABLE';
+
+/**
+ * Honest Registrar Capability Lifecycle State
+ */
+export type RegistrarOperationalState =
+  | 'DISCOVERED'
+  | 'CONFIGURED'
+  | 'VERIFIED'
+  | 'OPERATIONAL'
+  | 'DEGRADED'
+  | 'UNAVAILABLE';
+
+/**
+ * Challenge & Discrepancy Types
+ */
+export type ChallengeType =
+  | 'bank_debited_not_allotted'
+  | 'cas_shares_credited'
+  | 'registrar_pan_not_found'
+  | 'incorrect_shares_allotted'
+  | 'refund_not_received';
+
+/**
+ * True Two-Person Dual-Control Challenge Lifecycle States
+ */
+export type ChallengeStatus =
+  | 'submitted'
+  | 'under_review'
+  | 'primary_approved'
+  | 'secondary_approved'
+  | 'resolved_allotted'
+  | 'resolved_rejected'
+  | 'withdrawn';
+
+/**
+ * Stage 4 Durable Outbox Delivery Status
+ */
+export type OutboxDeliveryStatus =
+  | 'PENDING'
+  | 'EMITTED'
+  | 'ACKNOWLEDGED'
+  | 'FAILED';
 
 /**
  * Normalized Allotment Outcome (Sanitized, NO RAW PII)
@@ -98,6 +153,7 @@ export interface RegistrarCapability {
   supports_dp_client_id_lookup: boolean;
   is_headless_api_available: boolean;
   requires_interactive_challenge: boolean;
+  operational_state: RegistrarOperationalState;
   terms_access_status: string;
   source_url: string;
   last_verified_at: string;
@@ -107,7 +163,7 @@ export interface RegistrarCapability {
 }
 
 /**
- * Immutable Allotment Verification Attempt
+ * Immutable Allotment Verification Attempt (Append-Only Ledger)
  */
 export interface AllotmentVerificationAttempt {
   id: string;
@@ -153,10 +209,116 @@ export interface ApplicationAllotmentProjection {
   reported_refund_amount: number;
   has_conflict: boolean;
   conflict_details?: string | null;
+  financial_dispatch_status: FinancialDispatchStatus;
+  dispatched_at?: string | null;
+  acknowledged_at?: string | null;
+  outbox_event_id?: string | null;
   source_observed_at?: string | null;
   first_verified_at?: string | null;
   last_verified_at?: string | null;
   updated_at: string;
+}
+
+/**
+ * True Two-Person Dual-Control Allotment Challenge
+ */
+export interface AllotmentChallenge {
+  id: string;
+  application_id: string;
+  user_id: string;
+  challenge_type: ChallengeType;
+  status: ChallengeStatus;
+  investor_statement: string;
+  claimed_shares_allotted: number;
+  claimed_amount: number;
+  
+  // Secure Private Storage Metadata (0 public URLs)
+  storage_object_id?: string | null;
+  evidence_sha256?: string | null;
+  mime_type: string;
+  file_size_bytes?: number | null;
+  
+  // Dual-Control Review 1
+  primary_reviewer_id?: string | null;
+  primary_reviewed_at?: string | null;
+  primary_notes?: string | null;
+  
+  // Dual-Control Review 2
+  secondary_reviewer_id?: string | null;
+  secondary_reviewed_at?: string | null;
+  secondary_notes?: string | null;
+  
+  resolution_reason?: string | null;
+  idempotency_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Stage 4 Durable Outbox Event
+ */
+export interface Stage4OutboxEvent {
+  id: string;
+  event_id: string;
+  event_type: 'allotment_verified';
+  application_id: string;
+  projection_id: string;
+  idempotency_key: string;
+  payload: AllotmentVerifiedEventPayload;
+  payload_hash: string;
+  status: OutboxDeliveryStatus;
+  retry_count: number;
+  max_retries: number;
+  last_error?: string | null;
+  created_at: string;
+  emitted_at?: string | null;
+  acknowledged_at?: string | null;
+  updated_at: string;
+}
+
+/**
+ * Hardened AllotmentVerifiedEvent Payload
+ */
+export interface AllotmentVerifiedEventPayload {
+  userId: string;
+  applicationId: string;
+  ipoId: string;
+  applicantId: string;
+  allotmentId: string;
+  sharesAllotted: number;
+  allotmentPrice: number;
+  allotmentAmount: number;
+  refundAmount: number;
+  evidenceClassification: VerificationEvidenceClassification;
+  verificationAttemptId: string;
+  rawObservationHash: string;
+  fundingOwnerType: 'user_personal' | 'external_tracked';
+}
+
+/**
+ * Canonical AllotmentVerifiedEvent Contract
+ */
+export interface AllotmentVerifiedEvent {
+  eventId: string;
+  eventType: 'allotment_verified';
+  occurredAt: string;
+  producer: 'stage4_allotment_engine';
+  schemaVersion: '1.0.0';
+  idempotencyKey: string;
+  payload: AllotmentVerifiedEventPayload;
+  payloadHash: string;
+}
+
+/**
+ * Resolved Lookup Query from Identity Resolver
+ */
+export interface ResolvedLookupQuery {
+  registrarCode: string;
+  registrarIssueId: string;
+  lookupType: LookupType;
+  identifierValue: string;
+  identifierMasked: string;
+  identifierHash: string;
 }
 
 export interface SubmitUserAssistedResultInput {
@@ -177,10 +339,9 @@ export interface RegistrarQueryInput {
   ipoId: string;
   registrarIssueId: string;
   lookupType: LookupType;
-  lookupValue: string; // Plain PAN or Application No to be masked + hashed before persistence
+  lookupValue: string;
   captchaAnswer?: string;
-  captchaToken?: string;
-  sessionCookies?: Record<string, string>;
+  challengeResponse?: string; // Captcha answer or user-provided session response
 }
 
 /**
@@ -190,7 +351,7 @@ export interface RegistrarAdapterResponse {
   success: boolean;
   status: VerificationAttemptStatus;
   normalizedResult?: NormalizedAllotmentResult;
-  rawResponseHash: string; // SHA-256 of raw response (HTML/JSON is NOT stored)
+  rawResponseHash: string;
   sourceObservedAt?: string;
   challengeRequired?: boolean;
   challengePayload?: {
