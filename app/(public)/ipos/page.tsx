@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { getPublishedIPOs, getIPOUniverseCounts } from "@/features/ipo/services/ipoService";
 import { IPOCategory, IPOStatus } from "@/features/ipo/types/ipo.types";
 import { Layers, Flame, Calendar, CheckCircle, FileText } from "lucide-react";
+import { IPOPagination } from "@/components/ipo/IPOPagination";
 import { cn } from "@/lib/utils";
 
 interface PageProps {
@@ -18,6 +19,8 @@ interface PageProps {
     year?: string;
     q?: string;
     sort?: string;
+    page?: string;
+    pageSize?: string;
   }>;
 }
 
@@ -30,6 +33,12 @@ export default async function IposPage({ searchParams }: PageProps) {
   const activeYear = params.year || "all";
   const searchQuery = params.q || "";
   const sortBy = (params.sort as "open_date" | "close_date" | "listing_date" | "issue_size" | "company_name") || "open_date";
+  
+  // Sanitize pagination parameters
+  const rawPage = parseInt(params.page || "1", 10);
+  const currentPage = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+  const rawPageSize = parseInt(params.pageSize || "20", 10);
+  const pageSize = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.min(100, rawPageSize) : 20;
 
   // Determine effective status filter combined with tab
   let effectiveStatus: IPOStatus | "all" | "current" | "upcoming" | "announced" | "past" = statusFilter;
@@ -46,23 +55,32 @@ export default async function IposPage({ searchParams }: PageProps) {
       year: activeYear !== "all" ? activeYear : undefined,
       searchQuery,
       sortBy,
+      page: currentPage,
+      pageSize,
     }),
     getIPOUniverseCounts(),
   ]);
 
-  const buildUrl = (updates: Record<string, string>) => {
+  const buildUrl = (updates: Record<string, string>, preservePage: boolean = false) => {
     const p = new URLSearchParams();
     if (activeTab !== "all") p.set("tab", activeTab);
     if (activeSegment !== "all") p.set("segment", activeSegment);
     if (activeYear !== "all") p.set("year", activeYear);
     if (searchQuery) p.set("q", searchQuery);
     if (sortBy !== "open_date") p.set("sort", sortBy);
+    if (pageSize !== 20) p.set("pageSize", String(pageSize));
+    if (preservePage && currentPage > 1) p.set("page", String(currentPage));
+
     for (const [k, v] of Object.entries(updates)) {
-      if (v === "all") p.delete(k);
+      if (v === "all" || (k === "page" && v === "1")) p.delete(k);
       else p.set(k, v);
     }
     const q = p.toString();
     return q ? `/ipos?${q}` : "/ipos";
+  };
+
+  const buildPageUrl = (newPage: number) => {
+    return buildUrl({ page: String(newPage) });
   };
 
   const tabItems = [
@@ -174,7 +192,12 @@ export default async function IposPage({ searchParams }: PageProps) {
       <div className="space-y-4">
         <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
           <span>
-            Showing <strong>{ipos.length}</strong> of <strong>{totalCount}</strong> published IPOs
+            Showing <strong className="text-[var(--text-primary)] font-semibold">{totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(totalCount, currentPage * pageSize)}</strong> of <strong className="text-[var(--text-primary)] font-semibold">{totalCount}</strong> published IPOs
+            {totalCount > pageSize && (
+              <span className="ml-1 text-[var(--text-muted)]">
+                (Page {currentPage} of {Math.ceil(totalCount / pageSize)})
+              </span>
+            )}
           </span>
         </div>
 
@@ -187,11 +210,27 @@ export default async function IposPage({ searchParams }: PageProps) {
             actionHref="/ipos"
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {ipos.map((ipo) => (
-              <IPOCard key={ipo.id} ipo={ipo} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {ipos.map((ipo) => (
+                <IPOCard key={ipo.id} ipo={ipo} />
+              ))}
+            </div>
+
+            {/* Pagination Controls */}
+            <IPOPagination
+              currentPage={currentPage}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              query={{
+                tab: activeTab,
+                segment: activeSegment,
+                year: activeYear,
+                q: searchQuery,
+                sort: sortBy,
+              }}
+            />
+          </>
         )}
       </div>
     </div>

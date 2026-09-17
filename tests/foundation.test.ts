@@ -462,6 +462,36 @@ describe("IPO SaaS Platform — Complete Test Suite", () => {
         ipo: mockIPO,
         financials: [
           {
+            id: "f0",
+            ipo_id: mockIPO.id,
+            financial_year: "FY23",
+            period_type: "full_year",
+            statement_type: "consolidated",
+            audit_status: "restated",
+            currency: "INR",
+            unit: "Crores",
+            revenue_cr: 1463.5,
+            revenue_growth_pct: 45.2,
+            ebitda_cr: 258.1,
+            ebitda_margin_pct: 17.6,
+            pat_cr: 110.2,
+            pat_margin_pct: 7.53,
+            eps: 3.2,
+            roe_pct: 21.5,
+            roce_pct: 24.2,
+            total_assets_cr: 1500,
+            total_debt_cr: 210.0,
+            net_worth_cr: 512.0,
+            operating_cash_flow_cr: 210.0,
+            free_cash_flow_cr: 95.0,
+            is_derived: false,
+            source: "RHP",
+            source_url: null,
+            as_of: null,
+            created_at: "2026-09-01",
+            updated_at: "2026-09-01",
+          },
+          {
             id: "f1",
             ipo_id: mockIPO.id,
             financial_year: "FY24",
@@ -546,19 +576,21 @@ describe("IPO SaaS Platform — Complete Test Suite", () => {
 
       assert.equal(breakdown.version, "v1.0-standard");
       assert.equal(breakdown.maxOverall, 100);
-      assert.ok(breakdown.overall >= 0 && breakdown.overall <= 100);
-      assert.ok(breakdown.financialHealth.score <= 25);
-      assert.ok(breakdown.valuation.score <= 20);
-      assert.ok(breakdown.issueStructure.score <= 15);
-      assert.ok(breakdown.marketSentiment.score <= 15);
-      assert.ok(breakdown.subscriptionDemand.score <= 15);
-      assert.ok(breakdown.industryRisk.score <= 10);
+      assert.ok(breakdown.overall !== null && breakdown.overall >= 0 && breakdown.overall <= 100);
+      assert.ok(breakdown.financialHealth.score !== null && breakdown.financialHealth.score <= 25);
+      assert.ok(breakdown.valuation.score !== null && breakdown.valuation.score <= 20);
+      assert.ok(breakdown.issueStructure.score !== null && breakdown.issueStructure.score <= 15);
+      assert.ok(breakdown.marketSentiment.score !== null && breakdown.marketSentiment.score <= 15);
+      assert.ok(breakdown.subscriptionDemand.score !== null && breakdown.subscriptionDemand.score <= 15);
+      assert.ok(breakdown.industryRisk.score !== null && breakdown.industryRisk.score <= 10);
       assert.equal(breakdown.isInsufficientData, false);
     });
 
     it("should flag insufficient_data when required data components are unavailable", () => {
       const bareBreakdown = calculateIPOScore({ ipo: mockIPO });
       assert.equal(bareBreakdown.isInsufficientData, true);
+      assert.equal(bareBreakdown.overall, null);
+      assert.equal(bareBreakdown.status, "INSUFFICIENT_DATA");
       assert.ok(bareBreakdown.missingCategories.length >= 3);
     });
   });

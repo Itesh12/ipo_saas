@@ -27,9 +27,15 @@ import {
   SubscriptionTrackerItem,
 } from "../types/ipo.types";
 
+import { IPOTieredCacheService } from "./ipoTieredCacheService";
+
 /**
  * Fetches the entire research bundle for a published IPO.
- * Safe against missing tables or missing records.
+ * Implements Phase E tiered caching:
+ * - Static research cached for 24h under ipo:research:${ipo.id}
+ * - Dynamic GMP cached for 60s under ipo:gmp:${ipo.id}
+ * - Dynamic Subscription cached for 60s under ipo:subscription:${ipo.id}
+ * - Allotment milestones cached for 300s under ipo:allotment:${ipo.id}
  */
 export async function getIPOResearchBundle(slug: string): Promise<IPOResearchBundle | null> {
   const ipo = await getIPOBySlug(slug);
@@ -37,66 +43,125 @@ export async function getIPOResearchBundle(slug: string): Promise<IPOResearchBun
 
   try {
     const supabase = await createClient();
+    const tags = IPOTieredCacheService.getTags(ipo.id);
 
-    const [
-      businessRes,
-      financialsRes,
-      valuationRes,
-      peersRes,
-      promotersRes,
-      strengthsRes,
-      risksRes,
-      gmpRes,
-      subRes,
-      scoreRes,
-      docsRes,
-      newsRes,
-      factsRes,
-      estimatesRes,
-      portalRes,
-      eventsRes,
-    ] = await Promise.all([
-      supabase.from("ipo_business_profiles").select("*").eq("ipo_id", ipo.id).maybeSingle(),
-      supabase.from("ipo_financials").select("*").eq("ipo_id", ipo.id).order("financial_year", { ascending: true }),
-      supabase.from("ipo_valuations").select("*").eq("ipo_id", ipo.id).maybeSingle(),
-      supabase.from("ipo_peers").select("*").eq("ipo_id", ipo.id),
-      supabase.from("ipo_promoters").select("*").eq("ipo_id", ipo.id),
-      supabase.from("ipo_strengths").select("*").eq("ipo_id", ipo.id).order("display_order", { ascending: true }),
-      supabase.from("ipo_risks").select("*").eq("ipo_id", ipo.id).order("display_order", { ascending: true }),
-      supabase.from("ipo_gmp_entries").select("*").eq("ipo_id", ipo.id).order("observed_at", { ascending: false }),
-      supabase.from("ipo_subscription_snapshots").select("*").eq("ipo_id", ipo.id).order("day_number", { ascending: true }),
-      supabase.from("ipo_scores").select("*").eq("ipo_id", ipo.id).maybeSingle(),
-      supabase.from("ipo_documents").select("*").eq("ipo_id", ipo.id),
-      supabase.from("ipo_news").select("*").eq("ipo_id", ipo.id).order("published_at", { ascending: false }),
-      supabase.from("ipo_allotment_facts").select("*").eq("ipo_id", ipo.id).maybeSingle(),
-      supabase.from("ipo_allotment_estimates").select("*").eq("ipo_id", ipo.id).maybeSingle(),
-      supabase.from("ipo_registrar_portal_status").select("*").eq("ipo_id", ipo.id).maybeSingle(),
-      supabase.from("ipo_allotment_events").select("*").eq("ipo_id", ipo.id).order("event_time", { ascending: true }),
-    ]);
+    // Tier 1: Static Prospectus Research (24h TTL)
+    const staticResearch = await IPOTieredCacheService.getOrSet(
+      `research:${ipo.id}`,
+      [tags.research],
+      86400,
+      async () => {
+        const [
+          businessRes,
+          financialsRes,
+          valuationRes,
+          peersRes,
+          promotersRes,
+          strengthsRes,
+          risksRes,
+          scoreRes,
+          docsRes,
+          newsRes,
+        ] = await Promise.all([
+          supabase.from("ipo_business_profiles").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+          supabase.from("ipo_financials").select("*").eq("ipo_id", ipo.id).order("financial_year", { ascending: true }),
+          supabase.from("ipo_valuations").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+          supabase.from("ipo_peers").select("*").eq("ipo_id", ipo.id),
+          supabase.from("ipo_promoters").select("*").eq("ipo_id", ipo.id),
+          supabase.from("ipo_strengths").select("*").eq("ipo_id", ipo.id).order("display_order", { ascending: true }),
+          supabase.from("ipo_risks").select("*").eq("ipo_id", ipo.id).order("display_order", { ascending: true }),
+          supabase.from("ipo_scores").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+          supabase.from("ipo_documents").select("*").eq("ipo_id", ipo.id),
+          supabase.from("ipo_news").select("*").eq("ipo_id", ipo.id).order("published_at", { ascending: false }),
+        ]);
 
-    const gmpList = (gmpRes.data || []) as unknown as IPOGMPEntryRow[];
-    const subList = (subRes.data || []) as unknown as IPOSubscriptionSnapshotRow[];
+        return {
+          businessProfile: (businessRes.data as unknown as IPOBusinessProfileRow) || null,
+          financials: (financialsRes.data as unknown as IPOFinancialRow[]) || [],
+          valuation: (valuationRes.data as unknown as IPOValuationRow) || null,
+          peers: (peersRes.data as unknown as IPOPeerRow[]) || [],
+          promoters: (promotersRes.data as unknown as IPOPromoterRow[]) || [],
+          strengths: (strengthsRes.data as unknown as IPOStrengthRow[]) || [],
+          risks: (risksRes.data as unknown as IPORiskRow[]) || [],
+          score: (scoreRes.data as unknown as IPOScoreRow) || null,
+          documents: (docsRes.data as unknown as IPODocumentRow[]) || [],
+          news: (newsRes.data as unknown as IPONewsRow[]) || [],
+        };
+      }
+    );
+
+    // Tier 2: Dynamic Grey Market Premium (60s TTL)
+    const gmpList = await IPOTieredCacheService.getOrSet(
+      `gmp:${ipo.id}`,
+      [tags.gmp],
+      60,
+      async () => {
+        const { data } = await supabase
+          .from("ipo_gmp_entries")
+          .select("*")
+          .eq("ipo_id", ipo.id)
+          .order("observed_at", { ascending: false });
+        return (data || []) as unknown as IPOGMPEntryRow[];
+      }
+    );
+
+    // Tier 3: Dynamic Subscription Demand (60s TTL)
+    const subList = await IPOTieredCacheService.getOrSet(
+      `sub:${ipo.id}`,
+      [tags.subscription],
+      60,
+      async () => {
+        const { data } = await supabase
+          .from("ipo_subscription_snapshots")
+          .select("*")
+          .eq("ipo_id", ipo.id)
+          .order("day_number", { ascending: true });
+        return (data || []) as unknown as IPOSubscriptionSnapshotRow[];
+      }
+    );
+
+    // Tier 4: Event-Driven Allotment Milestones (300s TTL)
+    const allotmentData = await IPOTieredCacheService.getOrSet(
+      `allotment:${ipo.id}`,
+      [tags.allotment],
+      300,
+      async () => {
+        const [factsRes, estimatesRes, portalRes, eventsRes] = await Promise.all([
+          supabase.from("ipo_allotment_facts").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+          supabase.from("ipo_allotment_estimates").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+          supabase.from("ipo_registrar_portal_status").select("*").eq("ipo_id", ipo.id).maybeSingle(),
+          supabase.from("ipo_allotment_events").select("*").eq("ipo_id", ipo.id).order("event_time", { ascending: true }),
+        ]);
+
+        return {
+          allotmentFacts: (factsRes?.data as unknown as IPOAllotmentFactRow) || null,
+          allotmentEstimates: (estimatesRes?.data as unknown as IPOAllotmentEstimateRow) || null,
+          registrarPortalStatus: (portalRes?.data as unknown as IPORegistrarPortalStatusRow) || null,
+          allotmentEvents: (eventsRes?.data as unknown as IPOAllotmentEventRow[]) || [],
+        };
+      }
+    );
 
     return {
       ipo,
-      businessProfile: (businessRes.data as unknown as IPOBusinessProfileRow) || null,
-      financials: (financialsRes.data as unknown as IPOFinancialRow[]) || [],
-      valuation: (valuationRes.data as unknown as IPOValuationRow) || null,
-      peers: (peersRes.data as unknown as IPOPeerRow[]) || [],
-      promoters: (promotersRes.data as unknown as IPOPromoterRow[]) || [],
-      strengths: (strengthsRes.data as unknown as IPOStrengthRow[]) || [],
-      risks: (risksRes.data as unknown as IPORiskRow[]) || [],
+      businessProfile: staticResearch.businessProfile,
+      financials: staticResearch.financials,
+      valuation: staticResearch.valuation,
+      peers: staticResearch.peers,
+      promoters: staticResearch.promoters,
+      strengths: staticResearch.strengths,
+      risks: staticResearch.risks,
       latestGmp: gmpList.length > 0 ? gmpList[0] : null,
       gmpHistory: gmpList,
       latestSubscription: subList.length > 0 ? subList[subList.length - 1] : null,
       subscriptionSnapshots: subList,
-      score: (scoreRes.data as unknown as IPOScoreRow) || null,
-      documents: (docsRes.data as unknown as IPODocumentRow[]) || [],
-      news: (newsRes.data as unknown as IPONewsRow[]) || [],
-      allotmentFacts: (factsRes?.data as unknown as IPOAllotmentFactRow) || null,
-      allotmentEstimates: (estimatesRes?.data as unknown as IPOAllotmentEstimateRow) || null,
-      registrarPortalStatus: (portalRes?.data as unknown as IPORegistrarPortalStatusRow) || null,
-      allotmentEvents: (eventsRes?.data as unknown as IPOAllotmentEventRow[]) || [],
+      score: staticResearch.score,
+      documents: staticResearch.documents,
+      news: staticResearch.news,
+      allotmentFacts: allotmentData.allotmentFacts,
+      allotmentEstimates: allotmentData.allotmentEstimates,
+      registrarPortalStatus: allotmentData.registrarPortalStatus,
+      allotmentEvents: allotmentData.allotmentEvents,
     };
   } catch (error) {
     console.error("Error fetching IPO research bundle:", error);

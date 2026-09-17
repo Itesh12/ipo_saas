@@ -32,7 +32,10 @@ export async function getPublishedIPOs(filters: IPOFilterParams = {}): Promise<{
     }
 
     // Sorting
-    const sortField = filters.sortBy || "open_date";
+    let sortField = filters.sortBy || "open_date";
+    if (sortField === ("issue_size" as string)) {
+      sortField = "issue_size_cr" as typeof sortField;
+    }
     const isAscending = filters.sortOrder === "asc";
     query = query.order(sortField, { ascending: isAscending, nullsFirst: false });
 
@@ -93,7 +96,8 @@ export async function getPublishedIPOs(filters: IPOFilterParams = {}): Promise<{
         const rowYear =
           ((i as unknown as Record<string, unknown>).offering_year as number) ||
           (i.listing_date ? parseInt(i.listing_date.slice(0, 4), 10) : null) ||
-          (i.open_date ? parseInt(i.open_date.slice(0, 4), 10) : null);
+          (i.open_date ? parseInt(i.open_date.slice(0, 4), 10) : null) ||
+          new Date().getFullYear();
         return rowYear === targetYear;
       });
     }

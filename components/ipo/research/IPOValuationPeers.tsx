@@ -11,9 +11,10 @@ interface IPOValuationPeersProps {
   ipo: IPORow;
   valuation: IPOValuationRow | null;
   peers: IPOPeerRow[];
+  latestRevenueCr?: number | null;
 }
 
-export function IPOValuationPeers({ ipo, valuation, peers }: IPOValuationPeersProps) {
+export function IPOValuationPeers({ ipo, valuation, peers, latestRevenueCr }: IPOValuationPeersProps) {
   const priceBandStr =
     ipo.price_band_low && ipo.price_band_high
       ? ipo.price_band_low === ipo.price_band_high
@@ -118,7 +119,7 @@ export function IPOValuationPeers({ ipo, valuation, peers }: IPOValuationPeersPr
                     </Badge>
                   </td>
                   <td className="py-2.5 px-4 text-right">{valuation?.market_cap_cr ? formatCrores(valuation.market_cap_cr) : "TBA"}</td>
-                  <td className="py-2.5 px-4 text-right">{formatCrores(ipo.issue_size_cr)}</td>
+                  <td className="py-2.5 px-4 text-right">{latestRevenueCr ? formatCrores(latestRevenueCr) : "—"}</td>
                   <td className="py-2.5 px-4 text-right text-[var(--brand-primary)]">
                     {valuation?.pe_ratio_high ? `${valuation.pe_ratio_high}x` : "TBA"}
                   </td>

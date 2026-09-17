@@ -57,7 +57,7 @@ export function IPOPromotersStructure({ ipo, promoters }: IPOPromotersStructureP
             <div className="p-2.5 rounded-lg bg-[var(--bg-surface-elevated)]/40 border border-[var(--border-subtle)]">
               <span className="text-[10px] text-[var(--text-muted)] font-medium">Face Value</span>
               <p className="text-xs font-bold text-[var(--text-primary)] mt-0.5">
-                {ipo.face_value ? `₹${ipo.face_value} per share` : "₹10 per share"}
+                {ipo.face_value ? `₹${ipo.face_value} per share` : "TBA"}
               </p>
             </div>
             <div className="p-2.5 rounded-lg bg-[var(--bg-surface-elevated)]/40 border border-[var(--border-subtle)]">
@@ -69,7 +69,7 @@ export function IPOPromotersStructure({ ipo, promoters }: IPOPromotersStructureP
             <div className="p-2.5 rounded-lg bg-[var(--bg-surface-elevated)]/40 border border-[var(--border-subtle)]">
               <span className="text-[10px] text-[var(--text-muted)] font-medium">Retail Quota</span>
               <p className="text-xs font-bold text-[var(--status-success)] mt-0.5">
-                {ipo.retail_quota_pct ? `${ipo.retail_quota_pct}%` : "35%"}
+                {ipo.retail_quota_pct ? `${ipo.retail_quota_pct}%` : "TBA"}
               </p>
             </div>
           </div>

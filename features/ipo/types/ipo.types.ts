@@ -107,15 +107,62 @@ export interface IPOResearchBundle {
   allotmentEvents?: IPOAllotmentEventRow[];
 }
 
+export interface ScoreCategoryFundamentals {
+  eligible: boolean;
+  periodsCount: number;
+  hasRevenue: boolean;
+  hasPAT: boolean;
+  hasEbitda: boolean;
+  sourceVerified: boolean;
+  notes: string[];
+}
+
+export interface ScoreCategoryValuation {
+  eligible: boolean;
+  hasIssuePe: boolean;
+  hasPeerData: boolean;
+  peerCount: number;
+  notes: string[];
+}
+
+export interface ScoreCategoryDemand {
+  eligible: boolean;
+  hasQib: boolean;
+  hasNii: boolean;
+  hasRetail: boolean;
+  hasOverall: boolean;
+  notes: string[];
+}
+
+export interface ScoreCategorySentiment {
+  eligible: boolean;
+  hasGmp: boolean;
+  isUnofficial: boolean;
+  notes: string[];
+}
+
+export interface ScoreDataEligibility {
+  isEligible: boolean;
+  ineligibilityReasons: string[];
+  categories: {
+    fundamentals: ScoreCategoryFundamentals;
+    valuation: ScoreCategoryValuation;
+    demand: ScoreCategoryDemand;
+    sentiment: ScoreCategorySentiment;
+  };
+}
+
 export interface IPOScoreBreakdown {
-  financialHealth: { score: number; max: number; notes: string[] };
-  valuation: { score: number; max: number; notes: string[] };
-  issueStructure: { score: number; max: number; notes: string[] };
-  marketSentiment: { score: number; max: number; notes: string[] };
-  subscriptionDemand: { score: number; max: number; notes: string[] };
-  industryRisk: { score: number; max: number; notes: string[] };
-  overall: number;
+  financialHealth: { score: number | null; max: number; notes: string[] };
+  valuation: { score: number | null; max: number; notes: string[] };
+  issueStructure: { score: number | null; max: number; notes: string[] };
+  marketSentiment: { score: number | null; max: number; notes: string[] };
+  subscriptionDemand: { score: number | null; max: number; notes: string[] };
+  industryRisk: { score: number | null; max: number; notes: string[] };
+  overall: number | null;
   maxOverall: number;
+  status: "VALID_SCORE" | "INSUFFICIENT_DATA";
+  eligibility: ScoreDataEligibility;
   isInsufficientData: boolean;
   missingCategories: string[];
   version: string;

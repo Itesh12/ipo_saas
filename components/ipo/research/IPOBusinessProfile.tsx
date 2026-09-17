@@ -84,7 +84,7 @@ export function IPOBusinessProfile({ ipo, profile }: IPOBusinessProfileProps) {
         )}
 
         <div className="pt-2 border-t border-[var(--border-subtle)]/40 flex justify-between items-center text-[11px] text-[var(--text-muted)]">
-          <span>Source: {profile?.source || "Official SEBI RHP Filing"}</span>
+          <span>Source: {profile?.source || "Awaiting Prospectus Disclosures"}</span>
           {profile?.as_of && <span>As of: {new Date(profile.as_of).toLocaleDateString("en-IN")}</span>}
         </div>
       </CardContent>

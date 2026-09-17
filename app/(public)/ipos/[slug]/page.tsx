@@ -273,7 +273,12 @@ export default async function IPODetailPage({ params }: PageProps) {
             <TrendingUp className="w-4 h-4 text-[var(--brand-primary)]" />
             <h2 className="text-base font-bold text-[var(--text-primary)]">Valuation Multiples & Listed Peer Comparison</h2>
           </div>
-          <IPOValuationPeers ipo={ipo} valuation={valuation} peers={peers} />
+          <IPOValuationPeers
+            ipo={ipo}
+            valuation={valuation}
+            peers={peers}
+            latestRevenueCr={financials && financials.length > 0 ? financials[financials.length - 1].revenue_cr : null}
+          />
         </section>
 
         {/* Section 6: Structure & Promoters */}
