@@ -6,6 +6,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { marketDataProvider } from "./marketDataProvider";
+import { DecimalPrecision } from "../utils/decimalPrecision";
 import {
   HoldingItem,
   PortfolioSummary,
@@ -131,20 +132,27 @@ export async function getUserPortfolioHoldings(
     let unrealizedPnl: number | null = null;
     let unrealizedPnlPct: number | null = null;
 
-    totalInvestedOverall = Math.round((totalInvestedOverall + pos.total_invested_cost) * 100) / 100;
-    totalRealized = Math.round((totalRealized + pos.realized_pnl) * 100) / 100;
+    totalInvestedOverall = DecimalPrecision.add(totalInvestedOverall, pos.total_invested_cost);
+    totalRealized = DecimalPrecision.add(totalRealized, pos.realized_pnl);
 
     if (currentPrice !== null && currentPrice > 0) {
       hasAnyMarketPrice = true;
-      marketValue = Math.round(pos.quantity * currentPrice * 100) / 100;
-      unrealizedPnl = Math.round((marketValue - pos.total_invested_cost) * 100) / 100;
-      unrealizedPnlPct =
-        pos.total_invested_cost > 0
-          ? Math.round((unrealizedPnl / pos.total_invested_cost) * 10000) / 100
-          : 0;
+      const mvStr = DecimalPrecision.multiplyStr(pos.quantity.toString(), currentPrice.toString(), 8);
+      marketValue = parseFloat(DecimalPrecision.formatCurrency(mvStr, 2));
 
-      totalInvestedPriced = Math.round((totalInvestedPriced + pos.total_invested_cost) * 100) / 100;
-      totalMarketValue = Math.round((totalMarketValue + marketValue) * 100) / 100;
+      const unPnlStr = DecimalPrecision.subtractStr(mvStr, pos.total_invested_cost.toString(), 8);
+      unrealizedPnl = parseFloat(DecimalPrecision.formatCurrency(unPnlStr, 2));
+
+      if (pos.total_invested_cost > 0) {
+        const ratioStr = DecimalPrecision.divideStr(unPnlStr, pos.total_invested_cost.toString(), 8);
+        const pctStr = DecimalPrecision.multiplyStr(ratioStr, '100', 4);
+        unrealizedPnlPct = parseFloat(pctStr);
+      } else {
+        unrealizedPnlPct = 0;
+      }
+
+      totalInvestedPriced = DecimalPrecision.add(totalInvestedPriced, pos.total_invested_cost);
+      totalMarketValue = DecimalPrecision.add(totalMarketValue, marketValue);
     } else {
       unpricedCount += 1;
     }
@@ -172,11 +180,18 @@ export async function getUserPortfolioHoldings(
     };
   });
 
-  const totalUnrealizedPnl = hasAnyMarketPrice ? Math.round((totalMarketValue - totalInvestedPriced) * 100) / 100 : null;
-  const totalUnrealizedPnlPct =
-    hasAnyMarketPrice && totalInvestedPriced > 0
-      ? Math.round(((totalMarketValue - totalInvestedPriced) / totalInvestedPriced) * 10000) / 100
-      : null;
+  let totalUnrealizedPnl: number | null = null;
+  let totalUnrealizedPnlPct: number | null = null;
+
+  if (hasAnyMarketPrice) {
+    const diffStr = DecimalPrecision.subtractStr(totalMarketValue.toString(), totalInvestedPriced.toString(), 8);
+    totalUnrealizedPnl = parseFloat(DecimalPrecision.formatCurrency(diffStr, 2));
+
+    if (totalInvestedPriced > 0) {
+      const pnlRatio = DecimalPrecision.divideStr(diffStr, totalInvestedPriced.toString(), 8);
+      totalUnrealizedPnlPct = parseFloat(DecimalPrecision.multiplyStr(pnlRatio, '100', 4));
+    }
+  }
 
   return {
     summary: {
