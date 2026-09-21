@@ -99,38 +99,7 @@ export class PortfolioExitService {
     const executionDate = input.executionDate || new Date().toISOString();
     const executionSource = input.executionSource || 'MANUAL';
 
-    // 1. Idempotency Check on DB (E14)
-    const { data: existingExit } = await supabase
-      .from('portfolio_exit_transactions')
-      .select('*')
-      .eq('idempotency_key', input.idempotencyKey)
-      .maybeSingle();
-
-    if (existingExit) {
-      if (existingExit.exit_status === 'EXECUTED' || existingExit.exit_status === 'SETTLED') {
-        return {
-          success: true,
-          status: existingExit.exit_status,
-          exitTransactionId: existingExit.id,
-          investmentTransactionId: existingExit.investment_transaction_id,
-          journalEntryId: existingExit.journal_entry_id,
-          quantitySold: existingExit.quantity_sold.toString(),
-          executionPrice: existingExit.execution_price.toString(),
-          grossProceeds: existingExit.gross_proceeds.toString(),
-          totalCharges: existingExit.total_charges.toString(),
-          netProceeds: existingExit.net_proceeds.toString(),
-          costBasisConsumed: existingExit.cost_basis_consumed.toString(),
-          realizedPnl: existingExit.realized_pnl.toString(),
-          realizedPnlPct: existingExit.realized_pnl_pct ? existingExit.realized_pnl_pct.toString() : '0.0000',
-          gainType: existingExit.gain_type,
-          taxClassification: existingExit.tax_classification,
-          taxRuleVersion: existingExit.tax_rule_version,
-          isDuplicate: true,
-        };
-      }
-    }
-
-    // 2. Validate Inputs
+    // 1. Validate Inputs (E17)
     const quantitySold = input.quantitySold;
     const executionPrice = input.executionPrice;
 
@@ -152,47 +121,8 @@ export class PortfolioExitService {
       };
     }
 
-    // 3. Find target portfolio position
-    let posQuery = supabase
-      .from('portfolio_positions')
-      .select('*')
-      .eq('user_id', input.userId)
-      .eq('security_id', input.securityId);
-
-    if (input.applicantId) {
-      posQuery = posQuery.eq('applicant_id', input.applicantId);
-    } else {
-      posQuery = posQuery.is('applicant_id', null);
-    }
-
-    const { data: pos, error: posErr } = await posQuery.maybeSingle();
-
-    if (posErr || !pos) {
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'POSITION_NOT_FOUND',
-        errorMessage: `No portfolio position found for user ${input.userId}, security ${input.securityId}`,
-      };
-    }
-
-    const currentQty = pos.quantity.toString();
-    const currentCost = pos.total_invested_cost.toString();
-    const currentRealizedPnl = (pos.realized_pnl || 0).toString();
-
-    // Invariant: Overselling Protection (E3)
-    if (DecimalPrecision.ltStr(currentQty, quantitySold)) {
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'INSUFFICIENT_HOLDING_QUANTITY',
-        errorMessage: `Attempted to sell ${quantitySold} shares, but only ${currentQty} available in portfolio position.`,
-      };
-    }
-
-    // 4. E17: Server-derived charge aggregation and proceeds conservation
+    // 2. Server-derived charge aggregation and proceeds conservation (E17)
     const grossProceeds = DecimalPrecision.multiplyStr(quantitySold, executionPrice, 8);
-
     const rawCharges = input.charges || [];
     let totalCharges = '0.00000000';
     for (const ch of rawCharges) {
@@ -217,262 +147,10 @@ export class PortfolioExitService {
       };
     }
 
-    // 5. FIFO Tax Lot Consumption (E4, E5, E20)
-    let fifoResult;
-    try {
-      fifoResult = await TaxLotService.consumeLotsFIFO({
-        userId: input.userId,
-        applicantId: input.applicantId,
-        securityId: input.securityId,
-        quantityToSell: quantitySold,
-        executionDate,
-        customClient: supabase,
-      });
-    } catch (err: any) {
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'FIFO_CONSUMPTION_FAILED',
-        errorMessage: err.message || 'Failed to consume tax lots via FIFO.',
-      };
-    }
-
-    const { allocations, totalCostBasisConsumed, overallTaxClassification, taxRuleVersion } = fifoResult;
-
-    // 6. E15: Realized P&L Calculation
-    const realizedPnl = DecimalPrecision.subtractStr(netProceeds, totalCostBasisConsumed, 8);
-    let gainType: 'GAIN' | 'LOSS' | 'BREAKEVEN' = 'BREAKEVEN';
-    if (DecimalPrecision.gtStr(realizedPnl, '0')) gainType = 'GAIN';
-    else if (DecimalPrecision.ltStr(realizedPnl, '0')) gainType = 'LOSS';
-
-    let realizedPnlPct = '0.0000';
-    if (DecimalPrecision.gtStr(totalCostBasisConsumed, '0')) {
-      const ratio = DecimalPrecision.divideStr(realizedPnl, totalCostBasisConsumed, 8);
-      realizedPnlPct = DecimalPrecision.multiplyStr(ratio, '100', 4);
-    }
-
-    // 7. E9: General Ledger Journal Posting
+    // Ensure Chart of Accounts exists for GL posting
     await ensureUserChartOfAccounts(input.userId);
-    const clearingAcc = await getAccountByCode(input.userId, '1030'); // Broker / Clearing Receivable
-    const equityAcc = await getAccountByCode(input.userId, '1110'); // IPO Equities (Cost Basis)
-    const chargesAcc = await getAccountByCode(input.userId, '5020'); // STT & Transaction Fees
-    const gainAcc = await getAccountByCode(input.userId, '4010'); // Realized Capital Gains
-    const lossAcc = await getAccountByCode(input.userId, '5010'); // Realized Capital Losses
 
-    if (!clearingAcc || !equityAcc || !chargesAcc || !gainAcc || !lossAcc) {
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'CHART_OF_ACCOUNTS_INCOMPLETE',
-        errorMessage: 'Required financial accounts (1030, 1110, 5020, 4010, 5010) not provisioned.',
-      };
-    }
-
-    const netProceedsNum = parseFloat(netProceeds);
-    const totalChargesNum = parseFloat(totalCharges);
-    const costBasisNum = parseFloat(totalCostBasisConsumed);
-
-    // E9 & E15: Gross P&L for General Ledger so that Dr 1030 + Dr 5020 === Cr 1110 + Cr 4010
-    const grossPnlStr = DecimalPrecision.subtractStr(grossProceeds, totalCostBasisConsumed, 8);
-    const grossPnlNum = Math.abs(parseFloat(grossPnlStr));
-    const isGrossGain = DecimalPrecision.gteStr(grossPnlStr, '0');
-
-    const journalLines = [];
-
-    // Debit Broker Receivable for Net Proceeds
-    journalLines.push({
-      accountId: clearingAcc.id,
-      applicantId: input.applicantId || null,
-      debit: netProceedsNum,
-      credit: 0,
-      lineNarration: `Broker clearing receivable for sale of ${quantitySold} shares @ ₹${executionPrice}`,
-    });
-
-    // Debit Transaction Charges if > 0
-    if (totalChargesNum > 0) {
-      journalLines.push({
-        accountId: chargesAcc.id,
-        applicantId: input.applicantId || null,
-        debit: totalChargesNum,
-        credit: 0,
-        lineNarration: `Transaction charges & STT for sale of ${quantitySold} shares`,
-      });
-    }
-
-    // Credit Investment Equity Account for Cost Basis Consumed
-    journalLines.push({
-      accountId: equityAcc.id,
-      applicantId: input.applicantId || null,
-      debit: 0,
-      credit: costBasisNum,
-      lineNarration: `Cost basis relieved for ${quantitySold} shares (FIFO)`,
-    });
-
-    // Gross Gain or Loss posting
-    if (isGrossGain && grossPnlNum > 0) {
-      journalLines.push({
-        accountId: gainAcc.id,
-        applicantId: input.applicantId || null,
-        debit: 0,
-        credit: grossPnlNum,
-        lineNarration: `Realized capital gain on sale of ${quantitySold} shares`,
-      });
-    } else if (!isGrossGain && grossPnlNum > 0) {
-      journalLines.push({
-        accountId: lossAcc.id,
-        applicantId: input.applicantId || null,
-        debit: grossPnlNum,
-        credit: 0,
-        lineNarration: `Realized capital loss on sale of ${quantitySold} shares`,
-      });
-    }
-
-    // Balance check: Debits === Credits
-    const journalRes = await postJournalEntry({
-      userId: input.userId,
-      idempotencyKey: `journal:exit:${input.idempotencyKey}`,
-      journalType: 'security_sale',
-      referenceType: 'portfolio_exit',
-      narration: `Equity Exit: ${quantitySold} shares sold @ ₹${executionPrice}; Net=₹${netProceeds}; PnL=₹${realizedPnl}`,
-      lines: journalLines,
-      metadata: {
-        idempotencyKey: input.idempotencyKey,
-        quantitySold,
-        executionPrice,
-        grossProceeds,
-        totalCharges,
-        netProceeds,
-        costBasisConsumed: totalCostBasisConsumed,
-        realizedPnl,
-        gainType,
-      },
-    });
-
-    if (!journalRes.success && !journalRes.isDuplicate) {
-      // Revert lot deductions if journal fails
-      await TaxLotService.restoreLotsFromAllocations(allocations, supabase);
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'JOURNAL_POSTING_FAILED',
-        errorMessage: journalRes.error || 'Double-entry journal failed to balance.',
-      };
-    }
-
-    const journalEntryId = journalRes.journalId || null;
-
-    let investmentTxId: string | null = null;
-    let exitTransactionId: string | null = null;
-
-    const rollbackAll = async (errCode: string, errMsg: string) => {
-      // 1. Restore consumed tax lots
-      if (allocations && allocations.length > 0) {
-        await TaxLotService.restoreLotsFromAllocations(allocations, supabase);
-      }
-      // 2. Restore portfolio position to exact original state
-      await supabase
-        .from('portfolio_positions')
-        .update({
-          quantity: Math.round(parseFloat(currentQty)),
-          total_invested_cost: parseFloat(currentCost),
-          average_cost_price: parseFloat(pos.average_cost_price?.toString() || '0'),
-          realized_pnl: parseFloat(currentRealizedPnl),
-          updated_at: new Date().toISOString(),
-        } as never)
-        .eq('id', pos.id);
-
-      // 3. Clean up any partial exit allocations, charges, events, or exit record first
-      if (exitTransactionId) {
-        await supabase.from('portfolio_exit_events').delete().eq('exit_transaction_id', exitTransactionId);
-        await supabase.from('portfolio_exit_charges').delete().eq('exit_transaction_id', exitTransactionId);
-        await supabase.from('portfolio_exit_allocations').delete().eq('exit_transaction_id', exitTransactionId);
-        await supabase.from('portfolio_exit_transactions').delete().eq('id', exitTransactionId);
-      }
-
-      // 4. Delete inserted investment transaction if created
-      if (investmentTxId) {
-        await supabase.from('investment_transactions').delete().eq('id', investmentTxId);
-      }
-
-      // 5. Reverse posted GL journal entry if created
-      if (journalEntryId) {
-        await reverseJournalEntry({
-          userId: input.userId,
-          journalId: journalEntryId,
-          reversalReason: `Automatic rollback due to exit execution failure: ${errCode}`,
-        });
-      }
-
-      return {
-        success: false,
-        status: 'REJECTED' as const,
-        errorCode: errCode,
-        errorMessage: errMsg,
-      };
-    };
-
-    // 8. Insert investment_transactions record ('secondary_sale')
-    const { data: invTx, error: invErr } = await supabase
-      .from('investment_transactions')
-      .insert({
-        user_id: input.userId,
-        applicant_id: input.applicantId || null,
-        security_id: input.securityId,
-        journal_id: journalEntryId,
-        idempotency_key: `invtx:exit:${input.idempotencyKey}`,
-        transaction_type: 'secondary_sale',
-        transaction_date: executionDate,
-        quantity: Math.round(parseFloat(quantitySold)),
-        price_per_share: parseFloat(executionPrice),
-        gross_amount: parseFloat(grossProceeds),
-        fees: totalChargesNum,
-        net_amount: netProceedsNum,
-        notes: `Secondary Exit: ${quantitySold} shares sold @ ₹${executionPrice}`,
-      } as never)
-      .select('id')
-      .single();
-
-    if (invErr) {
-      return await rollbackAll('INVESTMENT_TRANSACTION_FAILED', invErr.message);
-    }
-
-    investmentTxId = invTx.id;
-
-    // 9. Update portfolio_positions (E22) with atomic row lock check
-    const newQty = DecimalPrecision.subtractStr(currentQty, quantitySold, 4);
-    const newCost = DecimalPrecision.subtractStr(currentCost, totalCostBasisConsumed, 8);
-    const newRealized = DecimalPrecision.addStr([currentRealizedPnl, realizedPnl], 8);
-    const newAvgPrice = DecimalPrecision.gtStr(newQty, '0')
-      ? DecimalPrecision.divideStr(newCost, newQty, 8)
-      : '0.00000000';
-
-    const { data: lockedPos, error: posUpErr } = await supabase
-      .from('portfolio_positions')
-      .update({
-        quantity: Math.max(0, Math.round(parseFloat(newQty))),
-        total_invested_cost: parseFloat(newCost),
-        average_cost_price: parseFloat(newAvgPrice),
-        realized_pnl: parseFloat(newRealized),
-        updated_at: new Date().toISOString(),
-      } as never)
-      .eq('id', pos.id)
-      .gte('quantity', Math.round(parseFloat(quantitySold)))
-      .select('id')
-      .maybeSingle();
-
-    if (posUpErr || !lockedPos) {
-      return await rollbackAll(
-        'INSUFFICIENT_HOLDING_QUANTITY',
-        posUpErr ? posUpErr.message : 'Position quantity changed concurrently during execution'
-      );
-    }
-
-    // Test hook: failure atomicity before exit insert
-    if (input._injectFailure === 'BEFORE_EXIT_INSERT') {
-      return await rollbackAll('INJECTED_FAILURE_BEFORE_EXIT_INSERT', 'Simulated failure before exit insert');
-    }
-
-    // 10. Compute Payload Hash (E13)
+    // 3. Compute Payload Hash (E13)
     const payloadHash = this.computePayloadHash({
       userId: input.userId,
       securityId: input.securityId,
@@ -481,178 +159,103 @@ export class PortfolioExitService {
       grossProceeds,
       totalCharges,
       netProceeds,
-      costBasisConsumed: totalCostBasisConsumed,
-      realizedPnl,
       idempotencyKey: input.idempotencyKey,
     });
 
-    // 11. Insert portfolio_exit_transactions
-    const { data: exitTx, error: exitInsErr } = await supabase
-      .from('portfolio_exit_transactions')
-      .insert({
-        user_id: input.userId,
-        applicant_id: input.applicantId || null,
-        security_id: input.securityId,
-        portfolio_position_id: pos.id,
-        idempotency_key: input.idempotencyKey,
-        exit_status: 'EXECUTED',
-        cost_basis_method: 'FIFO',
-        execution_source: executionSource,
-        source_record_id: input.sourceRecordId || null,
-        source_timestamp: input.sourceTimestamp || null,
-        quantity_sold: quantitySold,
-        execution_price: executionPrice,
-        gross_proceeds: grossProceeds,
-        total_charges: totalCharges,
-        net_proceeds: netProceeds,
-        cost_basis_consumed: totalCostBasisConsumed,
-        realized_pnl: realizedPnl,
-        realized_pnl_pct: realizedPnlPct,
-        gain_type: gainType,
-        tax_classification: overallTaxClassification,
-        tax_rule_version: taxRuleVersion,
-        investment_transaction_id: investmentTxId,
-        journal_entry_id: journalEntryId,
-        execution_date: executionDate,
-        settlement_date: input.settlementDate || null,
-        settlement_status: 'SETTLEMENT_PENDING',
-        payload_hash: payloadHash,
-        metadata: input.metadata || {},
-      } as never)
-      .select('id')
-      .single();
-
-    if (exitInsErr) {
-      if ((exitInsErr as any).code === '23505') {
-        // E14: Database unique constraint collision from concurrent independent execution
-        await rollbackAll('CONCURRENT_DUPLICATE', 'Idempotency key collision');
-        const { data: winner } = await supabase
-          .from('portfolio_exit_transactions')
-          .select('*')
-          .eq('idempotency_key', input.idempotencyKey)
-          .single();
-
-        if (winner) {
-          return {
-            success: true,
-            status: winner.exit_status,
-            exitTransactionId: winner.id,
-            investmentTransactionId: winner.investment_transaction_id,
-            journalEntryId: winner.journal_entry_id,
-            quantitySold: winner.quantity_sold.toString(),
-            executionPrice: winner.execution_price.toString(),
-            grossProceeds: winner.gross_proceeds.toString(),
-            totalCharges: winner.total_charges.toString(),
-            netProceeds: winner.net_proceeds.toString(),
-            costBasisConsumed: winner.cost_basis_consumed.toString(),
-            realizedPnl: winner.realized_pnl.toString(),
-            realizedPnlPct: winner.realized_pnl_pct ? winner.realized_pnl_pct.toString() : '0.0000',
-            gainType: winner.gain_type,
-            taxClassification: winner.tax_classification,
-            taxRuleVersion: winner.tax_rule_version,
-            isDuplicate: true,
-          };
-        }
-      }
-      return await rollbackAll('EXIT_INSERT_FAILED', exitInsErr.message);
-    }
-
-    exitTransactionId = exitTx.id;
-
-    // Test hook: failure atomicity after exit insert
-    if (input._injectFailure === 'AFTER_EXIT_INSERT') {
-      return await rollbackAll('INJECTED_FAILURE_AFTER_EXIT_INSERT', 'Simulated failure after exit insert');
-    }
-
-    // 12. Insert portfolio_exit_allocations (E7)
-    const allocationInserts = allocations.map((a) => ({
-      exit_transaction_id: exitTransactionId,
-      tax_lot_id: a.taxLotId,
-      allocated_quantity: a.allocatedQuantity,
-      cost_per_share: a.costPerShare,
-      allocated_cost_basis: a.allocatedCostBasis,
-      holding_period_days: a.holdingPeriodDays,
-      tax_classification: a.taxClassification,
-      tax_rule_version: a.taxRuleVersion,
-    }));
-
-    if (allocationInserts.length > 0) {
-      const { error: allocInsErr } = await supabase.from('portfolio_exit_allocations').insert(allocationInserts as never);
-      if (allocInsErr) {
-        return await rollbackAll('ALLOCATION_INSERT_FAILED', allocInsErr.message);
-      }
-    }
-
-    // 13. Insert portfolio_exit_charges (E12)
-    const chargeInserts = rawCharges.map((c) => ({
-      exit_transaction_id: exitTransactionId,
-      charge_type: c.chargeType,
-      amount: c.amount,
-      account_id: c.accountId || null,
-      notes: c.notes || null,
-    }));
-
-    if (chargeInserts.length > 0) {
-      const { error: chInsErr } = await supabase.from('portfolio_exit_charges').insert(chargeInserts as never);
-      if (chInsErr) {
-        return await rollbackAll('CHARGES_INSERT_FAILED', chInsErr.message);
-      }
-    }
-
-    // Test hook: failure atomicity after charges insert
-    if (input._injectFailure === 'AFTER_CHARGES_INSERT') {
-      return await rollbackAll('INJECTED_FAILURE_AFTER_CHARGES_INSERT', 'Simulated failure after charges insert');
-    }
-
-    // 14. Insert portfolio_exit_events (E10)
-    await supabase.from('portfolio_exit_events').insert({
-      exit_transaction_id: exitTransactionId,
-      event_type: 'EXIT_EXECUTED',
-      actor_id: input.actorId || input.userId,
-      previous_status: 'VALIDATING',
-      new_status: 'EXECUTED',
-      payload_hash: payloadHash,
-      metadata: {
-        quantitySold,
-        executionPrice,
-        grossProceeds,
-        netProceeds,
-        realizedPnl,
-      },
-    } as never);
-
-    // 15. E22: Verify Position Lot Consistency
-    await TaxLotService.verifyPositionLotConsistency({
-      userId: input.userId,
-      applicantId: input.applicantId,
-      securityId: input.securityId,
-      customClient: supabase,
+    // 4. Authoritative Database Atomic RPC Execution (E3, E16, E14, E4, E9, E10)
+    // Runs inside a single PostgreSQL ACID transaction with FOR UPDATE locks on portfolio_positions and portfolio_tax_lots
+    const { data: rpcData, error: rpcError } = await supabase.rpc('execute_portfolio_exit_atomic', {
+      p_user_id: input.userId,
+      p_applicant_id: input.applicantId || null,
+      p_security_id: input.securityId,
+      p_quantity_sold: parseFloat(quantitySold),
+      p_execution_price: parseFloat(executionPrice),
+      p_idempotency_key: input.idempotencyKey,
+      p_total_charges: parseFloat(totalCharges),
+      p_net_proceeds: parseFloat(netProceeds),
+      p_execution_source: executionSource,
+      p_tax_rule_version: 'IN_EQUITY_2024_V1',
+      p_source_record_id: input.sourceRecordId || null,
+      p_source_timestamp: input.sourceTimestamp || null,
+      p_execution_date: executionDate,
+      p_settlement_date: input.settlementDate || null,
+      p_payload_hash: payloadHash,
+      p_metadata: input.metadata || {},
+      p_charges: input.charges || [],
+      p_inject_failure: input._injectFailure || null,
     });
+
+    if (rpcError) {
+      let errorCode = 'EXIT_RPC_FAILED';
+      const msg = rpcError.message || '';
+      if (msg.includes('INJECTED_FAILURE_FOR_TEST:')) {
+        const injected = msg.split('INJECTED_FAILURE_FOR_TEST:')[1].trim();
+        errorCode = injected.startsWith('INJECTED_FAILURE_') ? injected : `INJECTED_FAILURE_${injected}`;
+      } else if (msg.includes('POSITION_NOT_FOUND')) errorCode = 'POSITION_NOT_FOUND';
+      else if (msg.includes('INSUFFICIENT_HOLDING_QUANTITY')) errorCode = 'INSUFFICIENT_HOLDING_QUANTITY';
+      else if (msg.includes('INSUFFICIENT_LOT_QUANTITY')) errorCode = 'INSUFFICIENT_LOT_QUANTITY';
+
+      return {
+        success: false,
+        status: 'REJECTED',
+        errorCode,
+        errorMessage: msg,
+      };
+    }
+
+    const formattedAllocations = (rpcData.allocations || []).map((a: any) => ({
+      taxLotId: a.taxLotId || a.tax_lot_id,
+      allocatedQuantity: (a.allocatedQuantity || a.allocated_quantity || '0').toString(),
+      costPerShare: (a.costPerShare || a.cost_per_share || '0').toString(),
+      allocatedCostBasis: (a.allocatedCostBasis || a.allocated_cost_basis || '0').toString(),
+      holdingPeriodDays: a.holdingPeriodDays ?? a.holding_period_days ?? 0,
+      taxClassification: a.taxClassification || a.tax_classification,
+      taxRuleVersion: a.taxRuleVersion || a.tax_rule_version || rpcData.taxRuleVersion || 'IN_EQUITY_2024_V1',
+    }));
+
+    // Populate holdingSummary from updated position
+    let posQuery = supabase
+      .from('portfolio_positions')
+      .select('quantity, total_invested_cost, average_cost_price, realized_pnl')
+      .eq('user_id', input.userId)
+      .eq('security_id', input.securityId);
+
+    if (input.applicantId) {
+      posQuery = posQuery.eq('applicant_id', input.applicantId);
+    } else {
+      posQuery = posQuery.is('applicant_id', null);
+    }
+    const { data: currentPos } = await posQuery.maybeSingle();
+
+    const holdingSummary = currentPos
+      ? {
+          remainingQuantity: (currentPos.quantity ?? 0).toString(),
+          remainingCostBasis: (currentPos.total_invested_cost ?? 0).toString(),
+          averageCostPrice: (currentPos.average_cost_price ?? 0).toString(),
+          cumulativeRealizedPnl: (currentPos.realized_pnl ?? 0).toString(),
+        }
+      : undefined;
 
     return {
       success: true,
-      status: 'EXECUTED',
-      exitTransactionId: exitTransactionId || undefined,
-      investmentTransactionId: investmentTxId || undefined,
-      journalEntryId: journalEntryId || undefined,
-      quantitySold,
-      executionPrice,
-      grossProceeds,
-      totalCharges,
-      netProceeds,
-      costBasisConsumed: totalCostBasisConsumed,
-      realizedPnl,
-      realizedPnlPct,
-      gainType,
-      taxClassification: overallTaxClassification,
-      taxRuleVersion,
-      allocations,
-      holdingSummary: {
-        remainingQuantity: newQty,
-        remainingCostBasis: newCost,
-        averageCostPrice: newAvgPrice,
-        cumulativeRealizedPnl: newRealized,
-      },
+      status: rpcData.status || 'EXECUTED',
+      exitTransactionId: rpcData.exitId,
+      investmentTransactionId: rpcData.investmentTransactionId,
+      journalEntryId: rpcData.journalEntryId,
+      quantitySold: rpcData.quantitySold,
+      executionPrice: rpcData.executionPrice,
+      grossProceeds: rpcData.grossProceeds,
+      totalCharges: rpcData.totalCharges,
+      netProceeds: rpcData.netProceeds,
+      costBasisConsumed: rpcData.costBasisConsumed,
+      realizedPnl: rpcData.realizedPnl,
+      realizedPnlPct: rpcData.realizedPnlPct || '0.0000',
+      gainType: rpcData.gainType,
+      taxClassification: rpcData.taxClassification,
+      taxRuleVersion: rpcData.taxRuleVersion || 'IN_EQUITY_2024_V1',
+      isDuplicate: rpcData.isDuplicate ? true : undefined,
+      allocations: formattedAllocations,
+      holdingSummary,
     };
   }
 
