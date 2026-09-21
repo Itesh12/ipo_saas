@@ -88,6 +88,8 @@ export interface ExecuteExitInput {
   sourceTimestamp?: string | null;
   metadata?: Record<string, any>;
   actorId?: string | null;
+  /** Test hook for verifying E16 failure atomicity */
+  _injectFailure?: 'BEFORE_EXIT_INSERT' | 'AFTER_EXIT_INSERT' | 'AFTER_CHARGES_INSERT';
 }
 
 export interface ExitExecutionResult {

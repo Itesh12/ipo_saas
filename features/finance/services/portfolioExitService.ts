@@ -17,7 +17,7 @@ import crypto from 'crypto';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { DecimalPrecision } from '../utils/decimalPrecision';
 import { TaxLotService } from './taxLotService';
-import { postJournalEntry } from './journalService';
+import { postJournalEntry, reverseJournalEntry } from './journalService';
 import { getAccountByCode, ensureUserChartOfAccounts } from './chartOfAccountsService';
 import {
   ExecuteExitInput,
@@ -361,6 +361,56 @@ export class PortfolioExitService {
 
     const journalEntryId = journalRes.journalId || null;
 
+    let investmentTxId: string | null = null;
+    let exitTransactionId: string | null = null;
+
+    const rollbackAll = async (errCode: string, errMsg: string) => {
+      // 1. Restore consumed tax lots
+      if (allocations && allocations.length > 0) {
+        await TaxLotService.restoreLotsFromAllocations(allocations, supabase);
+      }
+      // 2. Restore portfolio position to exact original state
+      await supabase
+        .from('portfolio_positions')
+        .update({
+          quantity: Math.round(parseFloat(currentQty)),
+          total_invested_cost: parseFloat(currentCost),
+          average_cost_price: parseFloat(pos.average_cost_price?.toString() || '0'),
+          realized_pnl: parseFloat(currentRealizedPnl),
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq('id', pos.id);
+
+      // 3. Clean up any partial exit allocations, charges, events, or exit record first
+      if (exitTransactionId) {
+        await supabase.from('portfolio_exit_events').delete().eq('exit_transaction_id', exitTransactionId);
+        await supabase.from('portfolio_exit_charges').delete().eq('exit_transaction_id', exitTransactionId);
+        await supabase.from('portfolio_exit_allocations').delete().eq('exit_transaction_id', exitTransactionId);
+        await supabase.from('portfolio_exit_transactions').delete().eq('id', exitTransactionId);
+      }
+
+      // 4. Delete inserted investment transaction if created
+      if (investmentTxId) {
+        await supabase.from('investment_transactions').delete().eq('id', investmentTxId);
+      }
+
+      // 5. Reverse posted GL journal entry if created
+      if (journalEntryId) {
+        await reverseJournalEntry({
+          userId: input.userId,
+          journalId: journalEntryId,
+          reversalReason: `Automatic rollback due to exit execution failure: ${errCode}`,
+        });
+      }
+
+      return {
+        success: false,
+        status: 'REJECTED' as const,
+        errorCode: errCode,
+        errorMessage: errMsg,
+      };
+    };
+
     // 8. Insert investment_transactions record ('secondary_sale')
     const { data: invTx, error: invErr } = await supabase
       .from('investment_transactions')
@@ -383,18 +433,12 @@ export class PortfolioExitService {
       .single();
 
     if (invErr) {
-      await TaxLotService.restoreLotsFromAllocations(allocations, supabase);
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'INVESTMENT_TRANSACTION_FAILED',
-        errorMessage: `Failed to record investment transaction: ${invErr.message}`,
-      };
+      return await rollbackAll('INVESTMENT_TRANSACTION_FAILED', invErr.message);
     }
 
-    const investmentTxId = invTx.id;
+    investmentTxId = invTx.id;
 
-    // 9. Update portfolio_positions (E22)
+    // 9. Update portfolio_positions (E22) with atomic row lock check
     const newQty = DecimalPrecision.subtractStr(currentQty, quantitySold, 4);
     const newCost = DecimalPrecision.subtractStr(currentCost, totalCostBasisConsumed, 8);
     const newRealized = DecimalPrecision.addStr([currentRealizedPnl, realizedPnl], 8);
@@ -402,7 +446,7 @@ export class PortfolioExitService {
       ? DecimalPrecision.divideStr(newCost, newQty, 8)
       : '0.00000000';
 
-    const { error: posUpErr } = await supabase
+    const { data: lockedPos, error: posUpErr } = await supabase
       .from('portfolio_positions')
       .update({
         quantity: Math.max(0, Math.round(parseFloat(newQty))),
@@ -411,16 +455,21 @@ export class PortfolioExitService {
         realized_pnl: parseFloat(newRealized),
         updated_at: new Date().toISOString(),
       } as never)
-      .eq('id', pos.id);
+      .eq('id', pos.id)
+      .gte('quantity', Math.round(parseFloat(quantitySold)))
+      .select('id')
+      .maybeSingle();
 
-    if (posUpErr) {
-      await TaxLotService.restoreLotsFromAllocations(allocations, supabase);
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'POSITION_UPDATE_FAILED',
-        errorMessage: `Failed to mutate portfolio position: ${posUpErr.message}`,
-      };
+    if (posUpErr || !lockedPos) {
+      return await rollbackAll(
+        'INSUFFICIENT_HOLDING_QUANTITY',
+        posUpErr ? posUpErr.message : 'Position quantity changed concurrently during execution'
+      );
+    }
+
+    // Test hook: failure atomicity before exit insert
+    if (input._injectFailure === 'BEFORE_EXIT_INSERT') {
+      return await rollbackAll('INJECTED_FAILURE_BEFORE_EXIT_INSERT', 'Simulated failure before exit insert');
     }
 
     // 10. Compute Payload Hash (E13)
@@ -474,16 +523,46 @@ export class PortfolioExitService {
       .single();
 
     if (exitInsErr) {
-      await TaxLotService.restoreLotsFromAllocations(allocations, supabase);
-      return {
-        success: false,
-        status: 'REJECTED',
-        errorCode: 'EXIT_INSERT_FAILED',
-        errorMessage: `Failed to insert exit transaction: ${exitInsErr.message}`,
-      };
+      if ((exitInsErr as any).code === '23505') {
+        // E14: Database unique constraint collision from concurrent independent execution
+        await rollbackAll('CONCURRENT_DUPLICATE', 'Idempotency key collision');
+        const { data: winner } = await supabase
+          .from('portfolio_exit_transactions')
+          .select('*')
+          .eq('idempotency_key', input.idempotencyKey)
+          .single();
+
+        if (winner) {
+          return {
+            success: true,
+            status: winner.exit_status,
+            exitTransactionId: winner.id,
+            investmentTransactionId: winner.investment_transaction_id,
+            journalEntryId: winner.journal_entry_id,
+            quantitySold: winner.quantity_sold.toString(),
+            executionPrice: winner.execution_price.toString(),
+            grossProceeds: winner.gross_proceeds.toString(),
+            totalCharges: winner.total_charges.toString(),
+            netProceeds: winner.net_proceeds.toString(),
+            costBasisConsumed: winner.cost_basis_consumed.toString(),
+            realizedPnl: winner.realized_pnl.toString(),
+            realizedPnlPct: winner.realized_pnl_pct ? winner.realized_pnl_pct.toString() : '0.0000',
+            gainType: winner.gain_type,
+            taxClassification: winner.tax_classification,
+            taxRuleVersion: winner.tax_rule_version,
+            isDuplicate: true,
+          };
+        }
+      }
+      return await rollbackAll('EXIT_INSERT_FAILED', exitInsErr.message);
     }
 
-    const exitTransactionId = exitTx.id;
+    exitTransactionId = exitTx.id;
+
+    // Test hook: failure atomicity after exit insert
+    if (input._injectFailure === 'AFTER_EXIT_INSERT') {
+      return await rollbackAll('INJECTED_FAILURE_AFTER_EXIT_INSERT', 'Simulated failure after exit insert');
+    }
 
     // 12. Insert portfolio_exit_allocations (E7)
     const allocationInserts = allocations.map((a) => ({
@@ -498,7 +577,10 @@ export class PortfolioExitService {
     }));
 
     if (allocationInserts.length > 0) {
-      await supabase.from('portfolio_exit_allocations').insert(allocationInserts as never);
+      const { error: allocInsErr } = await supabase.from('portfolio_exit_allocations').insert(allocationInserts as never);
+      if (allocInsErr) {
+        return await rollbackAll('ALLOCATION_INSERT_FAILED', allocInsErr.message);
+      }
     }
 
     // 13. Insert portfolio_exit_charges (E12)
@@ -511,7 +593,15 @@ export class PortfolioExitService {
     }));
 
     if (chargeInserts.length > 0) {
-      await supabase.from('portfolio_exit_charges').insert(chargeInserts as never);
+      const { error: chInsErr } = await supabase.from('portfolio_exit_charges').insert(chargeInserts as never);
+      if (chInsErr) {
+        return await rollbackAll('CHARGES_INSERT_FAILED', chInsErr.message);
+      }
+    }
+
+    // Test hook: failure atomicity after charges insert
+    if (input._injectFailure === 'AFTER_CHARGES_INSERT') {
+      return await rollbackAll('INJECTED_FAILURE_AFTER_CHARGES_INSERT', 'Simulated failure after charges insert');
     }
 
     // 14. Insert portfolio_exit_events (E10)
@@ -542,9 +632,9 @@ export class PortfolioExitService {
     return {
       success: true,
       status: 'EXECUTED',
-      exitTransactionId,
-      investmentTransactionId: investmentTxId,
-      journalEntryId,
+      exitTransactionId: exitTransactionId || undefined,
+      investmentTransactionId: investmentTxId || undefined,
+      journalEntryId: journalEntryId || undefined,
       quantitySold,
       executionPrice,
       grossProceeds,
