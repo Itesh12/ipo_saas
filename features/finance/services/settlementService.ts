@@ -24,6 +24,7 @@ import { SecurityResolver } from './securityResolver';
 import { DecimalPrecision } from '../utils/decimalPrecision';
 import { ensureUserChartOfAccounts, getAccountByCode } from './chartOfAccountsService';
 import { postJournalEntry } from './journalService';
+import { TaxLotService } from './taxLotService';
 import {
   AllotmentVerifiedEvent,
   SettlementRecord,
@@ -515,6 +516,13 @@ export class SettlementService {
 
           if (posInsErr) throw new Error(`Failed to create portfolio position: ${posInsErr.message}`);
           portfolioPositionId = (createdPos as { id: string })?.id || null;
+        }
+
+        // Candidate E: Idempotently seed authoritative acquisition tax lot
+        if (investmentTxId) {
+          await TaxLotService.createLotFromAllotment(investmentTxId, admin).catch((lotErr) => {
+            console.warn(`Tax lot creation warning for tx ${investmentTxId}:`, lotErr?.message || lotErr);
+          });
         }
       }
 

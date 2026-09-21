@@ -97,7 +97,13 @@ test("Candidate A — Production Closure & Acceptance Gate: 17-Point Verificatio
       listing_date: null,
       status: ipo.status,
     });
-    return derived === "open" && ipo.lot_size && ipo.lot_size > 0;
+    return (
+      derived === "open" &&
+      ipo.lot_size &&
+      ipo.lot_size > 0 &&
+      ipo.price_band_high &&
+      ipo.price_band_high > 0
+    );
   });
 
   console.log(`Dynamically discovered ${openIpos.length} currently-open canonical IPO(s) at ${nowIST.toISOString()}`);

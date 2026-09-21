@@ -136,4 +136,34 @@ export class DecimalPrecision {
     const numB = typeof b === 'string' ? parseFloat(b) : b;
     return Math.abs(numA - numB) < epsilon;
   }
+
+  /** Exact comparison between two decimal strings */
+  public static compareStr(a: string | number, b: string | number, scale = DecimalPrecision.INTERNAL_SCALE): number {
+    const bigA = this.toBigInt(a, scale);
+    const bigB = this.toBigInt(b, scale);
+    if (bigA > bigB) return 1;
+    if (bigA < bigB) return -1;
+    return 0;
+  }
+
+  public static gtStr(a: string | number, b: string | number): boolean {
+    return this.compareStr(a, b) > 0;
+  }
+
+  public static gteStr(a: string | number, b: string | number): boolean {
+    return this.compareStr(a, b) >= 0;
+  }
+
+  public static ltStr(a: string | number, b: string | number): boolean {
+    return this.compareStr(a, b) < 0;
+  }
+
+  public static lteStr(a: string | number, b: string | number): boolean {
+    return this.compareStr(a, b) <= 0;
+  }
+
+  public static eqStr(a: string | number, b: string | number): boolean {
+    return this.compareStr(a, b) === 0;
+  }
 }
+
