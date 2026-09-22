@@ -32,7 +32,11 @@ export default async function IposPage({ searchParams }: PageProps) {
   const activeSegment = params.segment || "all";
   const activeYear = params.year || "all";
   const searchQuery = params.q || "";
-  const sortBy = (params.sort as "open_date" | "close_date" | "listing_date" | "issue_size" | "company_name") || "open_date";
+  const sortParam = params.sort;
+  const sortBy =
+    sortParam && sortParam !== "default"
+      ? (sortParam as "open_date" | "close_date" | "listing_date" | "issue_size" | "company_name")
+      : undefined;
   
   // Sanitize pagination parameters
   const rawPage = parseInt(params.page || "1", 10);
@@ -67,7 +71,7 @@ export default async function IposPage({ searchParams }: PageProps) {
     if (activeSegment !== "all") p.set("segment", activeSegment);
     if (activeYear !== "all") p.set("year", activeYear);
     if (searchQuery) p.set("q", searchQuery);
-    if (sortBy !== "open_date") p.set("sort", sortBy);
+    if (sortBy) p.set("sort", sortBy);
     if (pageSize !== 20) p.set("pageSize", String(pageSize));
     if (preservePage && currentPage > 1) p.set("page", String(currentPage));
 
@@ -227,7 +231,7 @@ export default async function IposPage({ searchParams }: PageProps) {
                 segment: activeSegment,
                 year: activeYear,
                 q: searchQuery,
-                sort: sortBy,
+                sort: sortBy || "default",
               }}
             />
           </>

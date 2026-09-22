@@ -41,7 +41,7 @@ export function IPOQuickFacts({ ipo }: IPOQuickFactsProps) {
                 Lot Size
               </span>
               <p className="text-sm font-bold text-[var(--text-primary)]">
-                {ipo.lot_size} Shares
+                {ipo.lot_size ? `${ipo.lot_size} Shares` : "TBA"}
               </p>
             </div>
 
@@ -50,7 +50,7 @@ export function IPOQuickFacts({ ipo }: IPOQuickFactsProps) {
                 Minimum Investment
               </span>
               <p className="text-sm font-bold text-[var(--status-success)]">
-                {formatINR(ipo.min_investment)}
+                {ipo.min_investment ? formatINR(ipo.min_investment) : "TBA"}
               </p>
             </div>
 
@@ -59,7 +59,7 @@ export function IPOQuickFacts({ ipo }: IPOQuickFactsProps) {
                 Face Value
               </span>
               <p className="text-sm font-bold text-[var(--text-primary)]">
-                {formatINR(ipo.face_value)} per share
+                {ipo.face_value ? `${formatINR(ipo.face_value)} per share` : "TBA"}
               </p>
             </div>
           </div>
@@ -125,36 +125,54 @@ export function IPOQuickFacts({ ipo }: IPOQuickFactsProps) {
           <CardContent className="pt-4 space-y-3">
             <div className="flex items-center justify-between text-xs">
               <span className="text-[var(--text-secondary)]">Retail Individual Investors (RII)</span>
-              <span className="font-bold text-[var(--text-primary)]">{ipo.retail_quota_pct ?? 35}%</span>
+              <span className="font-bold text-[var(--text-primary)]">
+                {ipo.retail_quota_pct !== null && ipo.retail_quota_pct !== undefined
+                  ? `${ipo.retail_quota_pct}%`
+                  : "TBA (As per RHP)"}
+              </span>
             </div>
-            <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
-              <div
-                className="h-full bg-[var(--status-success)] rounded-full"
-                style={{ width: `${ipo.retail_quota_pct ?? 35}%` }}
-              />
-            </div>
+            {ipo.retail_quota_pct !== null && ipo.retail_quota_pct !== undefined && (
+              <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
+                <div
+                  className="h-full bg-[var(--status-success)] rounded-full"
+                  style={{ width: `${ipo.retail_quota_pct}%` }}
+                />
+              </div>
+            )}
 
             <div className="flex items-center justify-between text-xs pt-1">
               <span className="text-[var(--text-secondary)]">Qualified Institutional Buyers (QIB)</span>
-              <span className="font-bold text-[var(--text-primary)]">{ipo.qib_quota_pct ?? 50}%</span>
+              <span className="font-bold text-[var(--text-primary)]">
+                {ipo.qib_quota_pct !== null && ipo.qib_quota_pct !== undefined
+                  ? `${ipo.qib_quota_pct}%`
+                  : "TBA (As per RHP)"}
+              </span>
             </div>
-            <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
-              <div
-                className="h-full bg-[var(--brand-primary)] rounded-full"
-                style={{ width: `${ipo.qib_quota_pct ?? 50}%` }}
-              />
-            </div>
+            {ipo.qib_quota_pct !== null && ipo.qib_quota_pct !== undefined && (
+              <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
+                <div
+                  className="h-full bg-[var(--brand-primary)] rounded-full"
+                  style={{ width: `${ipo.qib_quota_pct}%` }}
+                />
+              </div>
+            )}
 
             <div className="flex items-center justify-between text-xs pt-1">
               <span className="text-[var(--text-secondary)]">Non-Institutional / HNI</span>
-              <span className="font-bold text-[var(--text-primary)]">{ipo.hni_quota_pct ?? 15}%</span>
+              <span className="font-bold text-[var(--text-primary)]">
+                {ipo.hni_quota_pct !== null && ipo.hni_quota_pct !== undefined
+                  ? `${ipo.hni_quota_pct}%`
+                  : "TBA (As per RHP)"}
+              </span>
             </div>
-            <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
-              <div
-                className="h-full bg-[var(--status-warning)] rounded-full"
-                style={{ width: `${ipo.hni_quota_pct ?? 15}%` }}
-              />
-            </div>
+            {ipo.hni_quota_pct !== null && ipo.hni_quota_pct !== undefined && (
+              <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
+                <div
+                  className="h-full bg-[var(--status-warning)] rounded-full"
+                  style={{ width: `${ipo.hni_quota_pct}%` }}
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
 

@@ -20,7 +20,7 @@ export function IPOFilterBar({ initialCategory, initialStatus }: IPOFilterBarPro
   const urlQ = searchParams.get("q") || "";
   const urlCategory = searchParams.get("category") || initialCategory || "all";
   const urlStatus = searchParams.get("status") || initialStatus || "all";
-  const urlSort = searchParams.get("sort") || "open_date";
+  const urlSort = searchParams.get("sort") || "default";
 
   const [search, setSearch] = useState(urlQ);
 
@@ -63,7 +63,7 @@ export function IPOFilterBar({ initialCategory, initialStatus }: IPOFilterBarPro
   };
 
   const hasActiveFilters = Boolean(
-    search || urlCategory !== "all" || urlStatus !== "all" || urlSort !== "open_date"
+    search || urlCategory !== "all" || urlStatus !== "all" || (urlSort !== "default" && urlSort !== "open_date")
   );
 
   return (
@@ -117,8 +117,9 @@ export function IPOFilterBar({ initialCategory, initialStatus }: IPOFilterBarPro
 
         <Select
           value={urlSort}
-          onChange={(e) => updateParam("sort", e.target.value, "open_date")}
+          onChange={(e) => updateParam("sort", e.target.value, "default")}
         >
+          <option value="default">Default Priority (Active First)</option>
           <option value="open_date">Sort by: Open Date</option>
           <option value="close_date">Sort by: Close Date</option>
           <option value="listing_date">Sort by: Listing Date</option>

@@ -61,7 +61,9 @@ export const ipoSchema = z
     lot_size: z
       .number()
       .int("Lot size must be an integer")
-      .positive("Lot size must be at least 1"),
+      .positive("Lot size must be at least 1")
+      .optional()
+      .nullable(),
 
     // Issue Size & Structure in Crores
     issue_size_cr: z
@@ -73,10 +75,10 @@ export const ipoSchema = z
     ofs_cr: z.number().nonnegative().optional().nullable(),
     shares_offered: z.number().int().positive().optional().nullable(),
 
-    // Quotas
-    retail_quota_pct: z.number().min(0).max(100).default(35),
-    qib_quota_pct: z.number().min(0).max(100).default(50),
-    hni_quota_pct: z.number().min(0).max(100).default(15),
+    // Quotas (No fabricated statutory defaults; must remain null if unverified)
+    retail_quota_pct: z.number().min(0).max(100).optional().nullable(),
+    qib_quota_pct: z.number().min(0).max(100).optional().nullable(),
+    hni_quota_pct: z.number().min(0).max(100).optional().nullable(),
 
     // Market Info
     exchange: z.string().default("NSE, BSE"),

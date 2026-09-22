@@ -135,7 +135,7 @@ export function IPOSubscriptionCard({ ipo, latestSubscription, snapshots }: IPOS
             {formatSubscriptionMultiple(sub?.retail_x)}
           </p>
           <span className="text-[10px] text-[var(--text-secondary)]">
-            Quota: {ipo.retail_quota_pct ? `${ipo.retail_quota_pct}%` : "35%"}
+            Quota: {ipo.retail_quota_pct ? `${ipo.retail_quota_pct}%` : "TBA"}
           </span>
         </div>
 

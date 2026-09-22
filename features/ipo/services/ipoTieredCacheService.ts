@@ -185,6 +185,19 @@ export class IPOTieredCacheService {
   }
 
   /**
+   * Invalidates ALL cached sub-domain representations for a given IPO:
+   * research, company, peers, subscription, gmp, lifecycle, allotment, news.
+   */
+  public static revalidateIPO(ipoId: string): number {
+    const tags = this.getTags(ipoId);
+    let totalPurged = 0;
+    for (const tag of Object.values(tags)) {
+      totalPurged += this.invalidateTag(tag);
+    }
+    return totalPurged;
+  }
+
+  /**
    * Inspection & Telemetry
    */
   public static getStats() {

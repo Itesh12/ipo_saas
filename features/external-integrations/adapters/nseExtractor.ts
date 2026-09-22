@@ -11,6 +11,24 @@ import {
   IpoProvenanceMap,
 } from '../ipo-master/ipoMasterTypes';
 
+export type IssueSizeRawUnit =
+  | 'INR_CRORES'
+  | 'INR_LAKHS'
+  | 'INR_ABSOLUTE'
+  | 'SHARES'
+  | 'AMBIGUOUS'
+  | 'NONE';
+
+export interface IssueSizeNormalizationResult {
+  raw_value: number | string | null | undefined;
+  raw_unit: IssueSizeRawUnit;
+  normalized_unit: 'INR_CRORES';
+  conversion_factor: number | null;
+  issue_size_cr: number | null;
+  confidence: 'official_exchange' | 'pending';
+  status: 'NORMALIZED' | 'SHARES_DETECTED' | 'AMBIGUOUS' | 'EMPTY';
+}
+
 export interface NseRawIssue {
   symbol: string;
   companyName: string;
@@ -37,7 +55,8 @@ export class NseIngestionAdapter {
     const lotSize = this.parseLotSize(raw.lotSize);
     const openDate = this.parseDate(raw.issueStartDate);
     const closeDate = this.parseDate(raw.issueEndDate);
-    const issueSizeCr = this.parseIssueSize(raw.issueSize);
+    const issueSizeResult = this.parseIssueSizeContract(raw.issueSize);
+    const issueSizeCr = issueSizeResult.issue_size_cr;
     const observedAt = new Date().toISOString();
 
     const isSme = raw.series === 'SM' || raw.companyName.toLowerCase().includes('sme');
@@ -154,6 +173,16 @@ export class NseIngestionAdapter {
         is_official: true,
       };
     }
+    if (normalized.issue_size_cr !== null && normalized.issue_size_cr !== undefined) {
+      provenance.issue_size_cr = {
+        value: normalized.issue_size_cr,
+        source: 'nse',
+        source_url: this.BASE_URL,
+        observed_at: observedAt,
+        confidence: 'official_exchange',
+        is_official: true,
+      };
+    }
 
     const externalId = `nse-${raw.symbol.toLowerCase()}`;
 
@@ -194,10 +223,135 @@ export class NseIngestionAdapter {
     return isNaN(parsed) || parsed <= 0 ? null : parsed;
   }
 
-  private static parseIssueSize(raw?: number | string): number | null {
-    if (raw === undefined || raw === null || raw === '') return null;
-    const parsed = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^0-9.]/g, ''));
-    return isNaN(parsed) || parsed <= 0 ? null : parsed;
+  /**
+   * Authoritative normalization contract for issueSize.
+   * STRICT CONTRACT: Never infer unit solely from numeric magnitude!
+   * - Explicit Crores: parsed value (conversion factor: 1.0)
+   * - Explicit Lakhs: parsed value * 0.01
+   * - Explicit INR Absolute: parsed value / 10,000,000
+   * - Explicit Shares: issue_size_cr = null (never store shares in issue_size_cr)
+   * - Bare number with no unit marker: AMBIGUOUS -> issue_size_cr = null
+   * - Null, empty, 0, malformed: issue_size_cr = null
+   */
+  public static parseIssueSizeContract(raw?: number | string | null): IssueSizeNormalizationResult {
+    if (raw === undefined || raw === null || raw === '' || raw === 0) {
+      return {
+        raw_value: raw,
+        raw_unit: 'NONE',
+        normalized_unit: 'INR_CRORES',
+        conversion_factor: null,
+        issue_size_cr: null,
+        confidence: 'official_exchange',
+        status: 'EMPTY',
+      };
+    }
+
+    const str = String(raw).trim();
+    if (!str || str === '-' || str === '--' || str.toLowerCase() === 'n/a') {
+      return {
+        raw_value: raw,
+        raw_unit: 'NONE',
+        normalized_unit: 'INR_CRORES',
+        conversion_factor: null,
+        issue_size_cr: null,
+        confidence: 'official_exchange',
+        status: 'EMPTY',
+      };
+    }
+
+    const lower = str.toLowerCase();
+
+    // 1. Explicit share count indicators
+    if (lower.includes('share') || lower.includes('eq shares') || lower.includes('equity')) {
+      return {
+        raw_value: raw,
+        raw_unit: 'SHARES',
+        normalized_unit: 'INR_CRORES',
+        conversion_factor: null,
+        issue_size_cr: null,
+        confidence: 'official_exchange',
+        status: 'SHARES_DETECTED',
+      };
+    }
+
+    const cleanCurrency = (s: string): string => {
+      return s.replace(/₹/g, '').replace(/Rs\./gi, '').replace(/Rs/gi, '').replace(/inr/gi, '').replace(/,/g, '');
+    };
+
+    // 2. Explicit Crores (e.g. "500 Cr", "500.5 Crores", "₹ 1,200 crore")
+    if (lower.includes('cr') || lower.includes('crore')) {
+      const numMatch = cleanCurrency(str).match(/(\d+(?:\.\d+)?)/);
+      if (numMatch) {
+        const parsed = parseFloat(numMatch[1]);
+        if (!isNaN(parsed) && parsed > 0) {
+          return {
+            raw_value: raw,
+            raw_unit: 'INR_CRORES',
+            normalized_unit: 'INR_CRORES',
+            conversion_factor: 1.0,
+            issue_size_cr: Math.round(parsed * 100) / 100,
+            confidence: 'official_exchange',
+            status: 'NORMALIZED',
+          };
+        }
+      }
+    }
+
+    // 3. Explicit Lakhs (e.g. "500 Lakhs", "2500 Lacs", "₹5000 lac")
+    if (lower.includes('lakh') || lower.includes('lac')) {
+      const numMatch = cleanCurrency(str).match(/(\d+(?:\.\d+)?)/);
+      if (numMatch) {
+        const parsed = parseFloat(numMatch[1]);
+        if (!isNaN(parsed) && parsed > 0) {
+          return {
+            raw_value: raw,
+            raw_unit: 'INR_LAKHS',
+            normalized_unit: 'INR_CRORES',
+            conversion_factor: 0.01,
+            issue_size_cr: Math.round(parsed * 0.01 * 100) / 100,
+            confidence: 'official_exchange',
+            status: 'NORMALIZED',
+          };
+        }
+      }
+    }
+
+    // 4. Explicit INR absolute currency marker without crore/lakh suffix (e.g. "₹50,00,00,000", "Rs. 100000000", "INR 50000000")
+    if (str.includes('₹') || lower.includes('rs.') || lower.includes('inr')) {
+      const numMatch = cleanCurrency(str).match(/(\d+(?:\.\d+)?)/);
+      if (numMatch) {
+        const parsed = parseFloat(numMatch[1]);
+        if (!isNaN(parsed) && parsed > 0) {
+          return {
+            raw_value: raw,
+            raw_unit: 'INR_ABSOLUTE',
+            normalized_unit: 'INR_CRORES',
+            conversion_factor: 1e-7,
+            issue_size_cr: Math.round((parsed / 10000000) * 100) / 100,
+            confidence: 'official_exchange',
+            status: 'NORMALIZED',
+          };
+        }
+      }
+    }
+
+    // 5. Bare number with no unit marker whatsoever:
+    // Strictly follow rule: NEVER infer unit from magnitude!
+    // Ambiguous -> return issue_size_cr = null
+    return {
+      raw_value: raw,
+      raw_unit: 'AMBIGUOUS',
+      normalized_unit: 'INR_CRORES',
+      conversion_factor: null,
+      issue_size_cr: null,
+      confidence: 'pending',
+      status: 'AMBIGUOUS',
+    };
+  }
+
+  public static parseIssueSize(raw?: number | string | null): number | null {
+    const result = this.parseIssueSizeContract(raw);
+    return result.issue_size_cr;
   }
 
   public static parseDate(raw?: string): string | null {

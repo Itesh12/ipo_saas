@@ -79,12 +79,16 @@ export function IPOCard({ ipo, className }: IPOCardProps) {
 
           <div>
             <span className="text-[10px] text-[var(--text-muted)] block uppercase font-medium">Lot Size</span>
-            <span className="font-semibold text-[var(--text-primary)]">{ipo.lot_size} Shares</span>
+            <span className="font-semibold text-[var(--text-primary)]">
+              {ipo.lot_size ? `${ipo.lot_size} Shares` : "TBA"}
+            </span>
           </div>
 
           <div>
             <span className="text-[10px] text-[var(--text-muted)] block uppercase font-medium">Min Investment</span>
-            <span className="font-semibold text-[var(--status-success)]">{formatINR(ipo.min_investment)}</span>
+            <span className="font-semibold text-[var(--status-success)]">
+              {ipo.min_investment ? formatINR(ipo.min_investment) : "TBA"}
+            </span>
           </div>
         </div>
       </div>

@@ -21,6 +21,7 @@ import {
 import { IpoPromotionValidator, PromotionValidationResult } from './ipoPromotionValidator';
 import { IpoLifecycleResolver, LifecycleResolutionOutcome } from './ipoLifecycleResolver';
 import { IPORow, IPOCategory } from '@/features/ipo/types/ipo.types';
+import { IPOTieredCacheService } from '@/features/ipo/services/ipoTieredCacheService';
 
 export interface PromotionEligibilityOutcome extends PromotionValidationResult {
   inboxRecord: CanonicalInboxRecord;
@@ -112,7 +113,7 @@ export class IpoCanonicalPromotionService {
     const category = this.resolveCategory(payload);
     const issueType = IpoPromotionValidator.normalizeIssueType(payload.issue_type);
     const hasAuthoritativeLot = Boolean(payload.lot_size && Number(payload.lot_size) > 0);
-    const dbLotSize = hasAuthoritativeLot ? Number(payload.lot_size) : 1;
+    const dbLotSize = hasAuthoritativeLot ? Number(payload.lot_size) : null;
     const lotSizeStatus = hasAuthoritativeLot ? 'verified' : 'pending_verification';
     const minInvestment = hasAuthoritativeLot && payload.price_band_high ? Number(payload.price_band_high) * Number(payload.lot_size) : null;
 
@@ -222,6 +223,8 @@ export class IpoCanonicalPromotionService {
       })
       .eq('id', inboxId);
 
+    IPOTieredCacheService.revalidateIPO(ipoId);
+
     return {
       success: true,
       ipoId,
@@ -261,7 +264,7 @@ export class IpoCanonicalPromotionService {
     const category = this.resolveCategory(payload);
     const issueType = IpoPromotionValidator.normalizeIssueType(payload.issue_type);
     const hasAuthoritativeLot = Boolean(payload.lot_size && Number(payload.lot_size) > 0);
-    const dbLotSize = hasAuthoritativeLot ? Number(payload.lot_size) : 1;
+    const dbLotSize = hasAuthoritativeLot ? Number(payload.lot_size) : null;
     const lotSizeStatus = hasAuthoritativeLot ? 'verified' : 'pending_verification';
     const minInvestment = hasAuthoritativeLot && payload.price_band_high ? Number(payload.price_band_high) * Number(payload.lot_size) : null;
 
@@ -359,6 +362,8 @@ export class IpoCanonicalPromotionService {
         reviewed_by: validAdminId,
       })
       .eq('id', inboxId);
+
+    IPOTieredCacheService.revalidateIPO(ipoId);
 
     return {
       success: true,

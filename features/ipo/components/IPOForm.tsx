@@ -57,9 +57,9 @@ export function IPOForm({
   const [sharesOffered, setSharesOffered] = useState<number | string>(initialData?.shares_offered ?? "");
 
   // Quotas
-  const [retailQuota, setRetailQuota] = useState<number | string>(initialData?.retail_quota_pct ?? 35);
-  const [qibQuota, setQibQuota] = useState<number | string>(initialData?.qib_quota_pct ?? 50);
-  const [hniQuota, setHniQuota] = useState<number | string>(initialData?.hni_quota_pct ?? 15);
+  const [retailQuota, setRetailQuota] = useState<number | string>(initialData?.retail_quota_pct ?? "");
+  const [qibQuota, setQibQuota] = useState<number | string>(initialData?.qib_quota_pct ?? "");
+  const [hniQuota, setHniQuota] = useState<number | string>(initialData?.hni_quota_pct ?? "");
 
   // Governance
   const [exchange, setExchange] = useState(initialData?.exchange || "NSE, BSE");
@@ -114,14 +114,14 @@ export function IPOForm({
       price_band_low: priceLow !== "" ? Number(priceLow) : undefined,
       price_band_high: priceHigh !== "" ? Number(priceHigh) : undefined,
       face_value: Number(faceValue) || 10,
-      lot_size: Number(lotSize) || 1,
+      lot_size: lotSize !== "" ? Number(lotSize) : undefined,
       issue_size_cr: issueSizeCr !== "" ? Number(issueSizeCr) : undefined,
       fresh_issue_cr: freshIssueCr !== "" ? Number(freshIssueCr) : undefined,
       ofs_cr: ofsCr !== "" ? Number(ofsCr) : undefined,
       shares_offered: sharesOffered !== "" ? Number(sharesOffered) : undefined,
-      retail_quota_pct: Number(retailQuota) || 35,
-      qib_quota_pct: Number(qibQuota) || 50,
-      hni_quota_pct: Number(hniQuota) || 15,
+      retail_quota_pct: retailQuota !== "" ? Number(retailQuota) : undefined,
+      qib_quota_pct: qibQuota !== "" ? Number(qibQuota) : undefined,
+      hni_quota_pct: hniQuota !== "" ? Number(hniQuota) : undefined,
       exchange: exchange || "NSE, BSE",
       registrar_name: registrar.trim() || undefined,
       lead_managers: leadManagersStr

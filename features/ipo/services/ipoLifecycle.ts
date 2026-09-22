@@ -10,7 +10,7 @@ export function calculateMinimumInvestment(
   priceBandLow?: number | null
 ): number | null {
   const price = priceBandHigh ?? priceBandLow;
-  const lots = lotSize ?? 1;
+  const lots = lotSize;
   if (!price || price <= 0 || !lots || lots <= 0) {
     return null;
   }

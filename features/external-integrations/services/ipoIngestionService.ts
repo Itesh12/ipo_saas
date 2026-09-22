@@ -17,6 +17,7 @@ import {
   IngestionObservationRecord,
 } from '../ipo-master/ipoMasterTypes';
 import { CanonicalIpoResolver } from './canonicalIpoResolver';
+import { IPOTieredCacheService } from '@/features/ipo/services/ipoTieredCacheService';
 
 export class IpoIngestionService {
   /**
@@ -318,8 +319,9 @@ export class IpoIngestionService {
       dbCategory = payload.exchange === 'BSE' ? 'sme_bse' : 'sme_nse';
     }
 
-    const lotSize = payload.lot_size && payload.lot_size > 0 ? payload.lot_size : 1;
-    const minInvestment = payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
+    const hasAuthoritativeLot = Boolean(payload.lot_size && Number(payload.lot_size) > 0);
+    const lotSize = hasAuthoritativeLot ? Number(payload.lot_size) : null;
+    const minInvestment = lotSize && payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
 
     // If already promoted, update the existing IPO record rather than inserting a duplicate
     if (inbox.promoted_ipo_id) {
@@ -356,6 +358,7 @@ export class IpoIngestionService {
         })
         .eq('id', inboxId);
 
+      IPOTieredCacheService.revalidateIPO(inbox.promoted_ipo_id);
       return inbox.promoted_ipo_id;
     }
 
@@ -446,8 +449,9 @@ export class IpoIngestionService {
       dbCategory = payload.exchange === 'BSE' ? 'sme_bse' : 'sme_nse';
     }
 
-    const lotSize = payload.lot_size && payload.lot_size > 0 ? payload.lot_size : 1;
-    const minInvestment = payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
+    const hasAuthoritativeLot = Boolean(payload.lot_size && Number(payload.lot_size) > 0);
+    const lotSize = hasAuthoritativeLot ? Number(payload.lot_size) : null;
+    const minInvestment = lotSize && payload.price_band_high ? Number(payload.price_band_high) * lotSize : null;
 
     if (inbox.promoted_ipo_id) {
       const { error: updateError } = await admin
@@ -484,6 +488,7 @@ export class IpoIngestionService {
         })
         .eq('id', inboxId);
 
+      IPOTieredCacheService.revalidateIPO(inbox.promoted_ipo_id);
       return inbox.promoted_ipo_id;
     }
 
@@ -524,6 +529,7 @@ export class IpoIngestionService {
       })
       .eq('id', inboxId);
 
+    IPOTieredCacheService.revalidateIPO(ipo.id);
     return ipo.id;
   }
 

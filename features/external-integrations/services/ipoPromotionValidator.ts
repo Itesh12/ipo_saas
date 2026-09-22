@@ -188,8 +188,8 @@ export class IpoPromotionValidator {
     payload: Partial<NormalizedIpoMasterPayload>,
     options?: { allowPendingLotSize?: boolean; allowAnnounced?: boolean }
   ): PromotionValidationResult {
-    // If allowAnnounced is true or default Stage 3A.5 behavior, use canonical existence validation
-    if (options?.allowAnnounced !== false) {
+    // If allowAnnounced is explicitly true, use canonical existence validation
+    if (options?.allowAnnounced === true) {
       return this.validateCanonicalExistence(inbox, payload);
     }
 
@@ -222,7 +222,15 @@ export class IpoPromotionValidator {
     const hasValidLow = !isNaN(low) && low > 0;
     const hasValidHigh = !isNaN(high) && high > 0;
 
-    if (hasValidLow && hasValidHigh && high >= low) {
+    const isFixedPrice = normalizedIssueType === 'fixed_price';
+    if (isFixedPrice) {
+      if (hasValidLow || hasValidHigh) {
+        passedFields.push('price_band');
+      } else {
+        missingFields.push('price_band');
+        rejectionReasons.push('Price band incomplete or unannounced');
+      }
+    } else if (hasValidLow && hasValidHigh && high >= low) {
       passedFields.push('price_band');
     } else {
       missingFields.push('price_band');
@@ -252,7 +260,11 @@ export class IpoPromotionValidator {
       rejectionReasons.push('Missing open date');
     }
 
-    if (payload.close_date && /^\d{4}-\d{2}-\d{2}$/.test(payload.close_date)) {
+    if (
+      payload.close_date &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payload.close_date) &&
+      (!payload.open_date || payload.close_date >= payload.open_date)
+    ) {
       passedFields.push('close_date');
     } else {
       missingFields.push('close_date');

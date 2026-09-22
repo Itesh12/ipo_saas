@@ -31,13 +31,8 @@ export async function getPublishedIPOs(filters: IPOFilterParams = {}): Promise<{
       query = query.or(`company_name.ilike.${term},symbol.ilike.${term}`);
     }
 
-    // Sorting
-    let sortField = filters.sortBy || "open_date";
-    if (sortField === ("issue_size" as string)) {
-      sortField = "issue_size_cr" as typeof sortField;
-    }
-    const isAscending = filters.sortOrder === "asc";
-    query = query.order(sortField, { ascending: isAscending, nullsFirst: false });
+    // Default fetch from database (deterministic baseline order)
+    query = query.order("created_at", { ascending: true, nullsFirst: false });
 
     // Fetch published candidates
     const { data, error } = await query;
@@ -64,10 +59,10 @@ export async function getPublishedIPOs(filters: IPOFilterParams = {}): Promise<{
       return instType === 'IPO' || instType === 'SME_IPO';
     });
 
-    // Dynamic IST Status / Tab filtering (Hard Gate 4 & 5)
+    // Dynamic IST Status / Tab filtering (using authoritative derived lifecycle status)
     if (filters.status && filters.status !== "all") {
       if (filters.status === "current") {
-        ipos = ipos.filter((i) => ["open", "closed", "allotment_pending", "listing_soon"].includes(i.status));
+        ipos = ipos.filter((i) => i.status === "open");
       } else if (filters.status === "upcoming") {
         ipos = ipos.filter((i) => i.status === "upcoming");
       } else if (filters.status === "announced") {
@@ -102,9 +97,123 @@ export async function getPublishedIPOs(filters: IPOFilterParams = {}): Promise<{
       });
     }
 
+    // Deterministic in-memory sorting BEFORE pagination
+    const compareTieBreakers = (a: IPORow, b: IPORow): number => {
+      const createdA = a.created_at || "";
+      const createdB = b.created_at || "";
+      if (createdA !== createdB) {
+        return createdA.localeCompare(createdB);
+      }
+      return (a.id || "").localeCompare(b.id || "");
+    };
+
+    const compareAsc = (a?: string | number | null, b?: string | number | null): number => {
+      if (a === b) return 0;
+      if (a === null || a === undefined) return 1;
+      if (b === null || b === undefined) return -1;
+      if (typeof a === "number" && typeof b === "number") return a - b;
+      return String(a).localeCompare(String(b));
+    };
+
+    const compareDesc = (a?: string | number | null, b?: string | number | null): number => {
+      if (a === b) return 0;
+      if (a === null || a === undefined) return 1;
+      if (b === null || b === undefined) return -1;
+      if (typeof a === "number" && typeof b === "number") return b - a;
+      return String(b).localeCompare(String(a));
+    };
+
+    const getLifecyclePriority = (status: string): number => {
+      switch (status) {
+        case "open":
+          return 1;
+        case "upcoming":
+          return 2;
+        case "allotment_pending":
+        case "closed":
+          return 3;
+        case "listing_soon":
+          return 4;
+        case "announced":
+          return 5;
+        case "listed":
+          return 6;
+        default:
+          return 7;
+      }
+    };
+
+    if (!filters.sortBy) {
+      if (filters.status === "upcoming") {
+        ipos.sort((a, b) => {
+          const cmp = compareAsc(a.open_date, b.open_date);
+          if (cmp !== 0) return cmp;
+          return compareTieBreakers(a, b);
+        });
+      } else if (filters.status === "current") {
+        ipos.sort((a, b) => {
+          const cmp = compareAsc(a.close_date, b.close_date);
+          if (cmp !== 0) return cmp;
+          return compareTieBreakers(a, b);
+        });
+      } else if (filters.status === "past") {
+        ipos.sort((a, b) => {
+          const cmp = compareDesc(a.listing_date, b.listing_date);
+          if (cmp !== 0) return cmp;
+          return compareTieBreakers(a, b);
+        });
+      } else {
+        // Default Catalog: 6 explicit lifecycle priority tiers
+        ipos.sort((a, b) => {
+          const prioA = getLifecyclePriority(a.status);
+          const prioB = getLifecyclePriority(b.status);
+          if (prioA !== prioB) {
+            return prioA - prioB;
+          }
+          if (prioA === 1) {
+            // OPEN: earliest close_date first
+            const cmp = compareAsc(a.close_date, b.close_date);
+            if (cmp !== 0) return cmp;
+          } else if (prioA === 2) {
+            // UPCOMING: earliest open_date first
+            const cmp = compareAsc(a.open_date, b.open_date);
+            if (cmp !== 0) return cmp;
+          } else if (prioA === 3) {
+            // ALLOTMENT_PENDING / CLOSED: close_date ASC
+            const cmp = compareAsc(a.close_date, b.close_date);
+            if (cmp !== 0) return cmp;
+          } else if (prioA === 4) {
+            // LISTING_SOON: listing_date ASC
+            const cmp = compareAsc(a.listing_date, b.listing_date);
+            if (cmp !== 0) return cmp;
+          } else if (prioA === 5) {
+            // ANNOUNCED: created_at DESC
+            const cmp = compareDesc(a.created_at, b.created_at);
+            if (cmp !== 0) return cmp;
+          } else if (prioA === 6) {
+            // LISTED: listing_date DESC
+            const cmp = compareDesc(a.listing_date, b.listing_date);
+            if (cmp !== 0) return cmp;
+          }
+          return compareTieBreakers(a, b);
+        });
+      }
+    } else {
+      let sortField = filters.sortBy as string;
+      if (sortField === "issue_size") sortField = "issue_size_cr";
+      const isAsc = filters.sortOrder === "asc";
+      ipos.sort((a, b) => {
+        const valA = (a as unknown as Record<string, unknown>)[sortField] as string | number | null | undefined;
+        const valB = (b as unknown as Record<string, unknown>)[sortField] as string | number | null | undefined;
+        const cmp = isAsc ? compareAsc(valA, valB) : compareDesc(valA, valB);
+        if (cmp !== 0) return cmp;
+        return compareTieBreakers(a, b);
+      });
+    }
+
     const totalCount = ipos.length;
 
-    // In-memory pagination on derived records
+    // In-memory pagination on derived, filtered, and deterministically sorted records
     const page = filters.page || 1;
     const pageSize = filters.pageSize || 20;
     const from = (page - 1) * pageSize;
@@ -179,7 +288,7 @@ export async function getIPOUniverseCounts(): Promise<{
       const derived = deriveIPOStatus(row as unknown as IPORow);
       all++;
 
-      if (['open', 'closed', 'allotment_pending', 'listing_soon'].includes(derived)) {
+      if (derived === 'open') {
         current++;
       } else if (derived === 'upcoming') {
         upcoming++;
