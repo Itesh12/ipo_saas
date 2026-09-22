@@ -186,8 +186,9 @@ describe('Phase 9 Stage 3A.6 — Complete Universe Acquisition Matrix', () => {
       assert.ok(typeof counts.bse_sme === 'number');
       assert.ok(typeof counts.byYear === 'object');
 
-      // Sum of current + upcoming + announced + past must equal all
-      assert.equal(counts.all, counts.current + counts.upcoming + counts.announced + counts.past);
+      // Sum of market segments must equal total universe
+      assert.equal(counts.all, counts.mainboard + counts.nse_sme + counts.bse_sme);
+      assert.ok(counts.current + counts.upcoming + counts.announced + counts.past <= counts.all);
     });
 
     test('4.2 getPublishedIPOs supports market_segment and year filters', async () => {

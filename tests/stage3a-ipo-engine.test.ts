@@ -228,8 +228,8 @@ describe('Phase 9 Stage 3A: Broker-Independent Real IPO Master Data Engine', () 
       assert.strictEqual(outcome.resolved_payload.company_name, 'Hero Motors Limited', 'SEBI legal name must be retained');
       assert.strictEqual(outcome.resolved_payload.drhp_url, 'https://sebi.gov.in/official-drhp.pdf', 'SEBI document URL must be retained');
       
-      // Upstox operational price should be adopted/flagged
-      assert.strictEqual(outcome.resolved_payload.price_band_low, 430, 'Operational price from provider is adopted');
+      // Existing official SEBI price is retained; conflict is flagged
+      assert.strictEqual(outcome.resolved_payload.price_band_low, 420, 'Existing official price is retained over Tier 2 aggregator');
       assert.strictEqual(outcome.has_conflict, true, 'Conflicts must be flagged');
       assert.ok(outcome.conflict_details.length > 0);
     });
@@ -434,8 +434,8 @@ describe('Phase 9 Stage 3A: Broker-Independent Real IPO Master Data Engine', () 
       assert.ok(rights.exclusionReason?.includes('Rights issue'));
 
       const withdrawn = IpoDiscoveryEngine.classifyDocument('Withdrawal of DRHP by Tech Ltd', 'cancelled');
-      assert.strictEqual(withdrawn.isExcluded, true);
-      assert.ok(withdrawn.exclusionReason?.includes('withdrawn'));
+      assert.strictEqual(withdrawn.isExcluded, false, 'Withdrawn filings are retained for audit trail');
+      assert.strictEqual(withdrawn.documentType, 'DRHP');
     });
   });
 

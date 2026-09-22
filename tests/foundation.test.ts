@@ -24,7 +24,7 @@ import {
   formatSubscriptionMultiple,
   calculateWeightedSubscription,
 } from "../features/ipo/services/subscriptionEngine";
-import { calculateIPOScore } from "../features/ipo/services/ipoScoreEngine";
+import { calculateIPOScore, SCORE_METHODOLOGY_VERSION } from "../features/ipo/services/ipoScoreEngine";
 import { ipoSchema } from "../features/ipo/schemas/ipoValidation";
 import { maskPAN, maskDematAccount, maskUPI } from "../features/application/services/piiMasking";
 import {
@@ -574,7 +574,7 @@ describe("IPO SaaS Platform — Complete Test Suite", () => {
         },
       });
 
-      assert.equal(breakdown.version, "v1.0-standard");
+      assert.equal(breakdown.version, SCORE_METHODOLOGY_VERSION);
       assert.equal(breakdown.maxOverall, 100);
       assert.ok(breakdown.overall !== null && breakdown.overall >= 0 && breakdown.overall <= 100);
       assert.ok(breakdown.financialHealth.score !== null && breakdown.financialHealth.score <= 25);

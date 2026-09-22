@@ -8,7 +8,7 @@
     "issueEndDate": "2026-09-18",
     "priceBand": "₹420 to ₹445",
     "lotSize": 33,
-    "issueSize": 1200.5,
+    "issueSize": "1200.5 Cr",
     "documentUrl": "https://www.nseindia.com/filings/hero-motors-rhp.pdf",
     "status": "upcoming"
   },
@@ -21,7 +21,7 @@
     "issueEndDate": "2026-09-12",
     "priceBand": "75 - 80",
     "lotSize": 1600,
-    "issueSize": 45.2,
+    "issueSize": "45.2 Cr",
     "documentUrl": "https://www.nseindia.com/filings/sona-selection-rhp.pdf",
     "status": "open"
   }
